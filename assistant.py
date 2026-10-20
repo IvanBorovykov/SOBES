@@ -3,7 +3,7 @@
 
 Hotkeys (swallowed, so the focused app never sees them):
     Option+X   detailed text/code answer from recent audio + screen
-    Option+Z   short Live hint from recent audio + screen
+    Option+Z   short screen hint from recent audio + screen
     Option+Q   short Live hint from recent audio only
 Other actions are available on the floating toolbar.
 """
@@ -63,8 +63,8 @@ from google.genai import errors, types
 from PIL import Image
 from PyObjCTools import AppHelper
 
-from live_connection import LiveConnection
 from realtime_hints import RealtimeHints
+from audio_payload import prepare_audio
 from api_keys import KeychainError, KeychainStore, KeyPool, credential_error
 from api_keys_ui import ApiKeysPanel
 from preferences import MAX_AUDIO_SECONDS, Preferences
@@ -96,10 +96,9 @@ SYSTEM_INSTRUCTION = (
 )
 USER_PROMPT = "Аудіо — останній фрагмент розмови, зображення — поточний екран."
 LIVE_INSTRUCTION = (
-    "Ти — помічник на IT-співбесіді. Після завершення кожної активності дай коротку "
-    "відповідь українською у 1–3 реченнях на останнє питання з поточного аудіо та "
-    "поточного знімка екрана, якщо його додано. Якщо зображення немає, відповідай лише за аудіо. Почни одразу з відповіді, без вступу. Не повторюй "
-    "попередні відповіді. Для задачі з кодом коротко поясни підхід, не диктуй код."
+    "Ти — голосовий помічник на IT-співбесіді. Дай коротку відповідь українською "
+    "у 1–3 реченнях на останнє питання з поточного аудіо. Почни одразу з відповіді, "
+    "без вступу. Не повторюй попередні відповіді. Для задачі з кодом коротко поясни підхід, не диктуй код."
 )
 
 OVERLAY_WIDTH = 560
@@ -187,6 +186,9 @@ class AudioRing:
             w.setframerate(SAMPLE_RATE)
             w.writeframes(pcm)
         return buf.getvalue()
+
+    def request_audio(self, pcm=None):
+        return prepare_audio(self.pcm_bytes() if pcm is None else pcm)
 
     def clear(self):
         with self._lock:
@@ -615,9 +617,6 @@ class Controls(NSObject):
         capture = by_key.get(self._preferences.capture_display)
         self._assistant.capture_display_id = capture["id"] if capture else -1
         self._audio.set_seconds(self._preferences.audio_seconds)
-        realtime = getattr(self._assistant, "_realtime", None)
-        if realtime:
-            realtime.set_display(self._assistant.capture_display_id)
         self.update_status()
 
     @objc.python_method
@@ -714,21 +713,12 @@ class Assistant:
         self._audio = audio
         self.keys = keys
         self._capture_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="capture")
-        candidates = keys.candidates(LIVE_MODEL)
-        client = keys.client(candidates[0]) if candidates else None
-        self._live = LiveConnection(client, LIVE_MODEL, LIVE_INSTRUCTION,
-                                    redact=keys.redact, on_key_error=keys.failed_client)
         self.capture_display_id = Quartz.CGMainDisplayID()
         self._realtime = None
         self._generation = 0  # bumped on every trigger/clear; stale streams stop rendering
 
     def start_realtime(self, on_status=None):
-        self._live.reset(None)  # Keep the on-demand fallback disconnected until needed.
-        self._realtime = RealtimeHints(
-            self.keys, LIVE_MODEL, LIVE_INSTRUCTION,
-            lambda display_id: capture_screenshot(display_id, fast=True),
-            self.capture_display_id, on_status,
-        )
+        self._realtime = RealtimeHints(self.keys, LIVE_MODEL, LIVE_INSTRUCTION, on_status)
         self._audio.subscribe(self._realtime.offer_audio)
 
     def toggle_realtime(self):
@@ -739,7 +729,7 @@ class Assistant:
     def analyze(self, screen_only=False, live=False, audio_only=False):
         self._generation += 1
         started = time.perf_counter()
-        preparing = "Відкриваю потокову підказку" if live and self._realtime and self._realtime.enabled else (
+        preparing = "Відкриваю потокову підказку" if live and audio_only and self._realtime and self._realtime.enabled else (
             "Готую аудіо без екрана" if audio_only else "Готую знімок екрана")
         self._overlay.show_text(f"⏳ {preparing}…  ·  «Очистить» — скасувати", reset_scroll=True)
         threading.Thread(
@@ -754,24 +744,19 @@ class Assistant:
         self._overlay.hide()
         if self._realtime:
             self._realtime.reset()
-        candidates = self.keys.candidates(LIVE_MODEL)
-        self._live.reset(None if self._realtime else self.keys.client(candidates[0]) if candidates else None)
 
     def close(self):
         self._generation += 1
         if self._realtime:
             self._audio.unsubscribe(self._realtime.offer_audio)
             self._realtime.close()
-        self._live.close()
         self._capture_pool.shutdown(wait=False, cancel_futures=True)
         self.keys.close()
 
     def credentials_changed(self):
         self._generation += 1
-        candidates = self.keys.candidates(LIVE_MODEL)
         if self._realtime:
             self._realtime.reset()
-        self._live.set_client(None if self._realtime else self.keys.client(candidates[0]) if candidates else None)
 
     def _show(self, generation, text):
         AppHelper.callAfter(self._show_if_current, generation, text)
@@ -780,34 +765,37 @@ class Assistant:
         if generation == self._generation:
             self._overlay.show_text(self.keys.redact(text))
 
-    def _run(self, generation, started, screen_only, prepared_inputs=None, capture_display_id=None, audio_only=False):
+    def _run(self, generation, started, screen_only, capture_display_id=None, audio_only=False, brief=False):
         try:
             if generation != self._generation:
                 return
-            if prepared_inputs is None:
-                screenshot = None if audio_only else self._capture_pool.submit(
-                    capture_screenshot, self.capture_display_id if capture_display_id is None else capture_display_id,
-                )
-                wav = None if screen_only else self._audio.wav_bytes()
-                jpeg = screenshot.result() if screenshot is not None else None
-            else:
-                jpeg, wav = prepared_inputs
+            display_id = self.capture_display_id if capture_display_id is None else capture_display_id
+            screenshot = None if audio_only else self._capture_pool.submit(
+                capture_screenshot, display_id, **({"fast": True} if brief else {}),
+            )
+            audio = None if screen_only else self._audio.request_audio()
+            jpeg = screenshot.result() if screenshot is not None else None
         except Exception as e:
             self._show(generation, f"⚠️ Не вдалося підготувати запит: {e}")
             return
-        if audio_only and not wav:
-            self._show(generation, "Аудіобуфер ще порожній. Повторіть після запису звуку.")
+        if audio_only and not audio:
+            self._show(generation, "У буфері немає звуку. Повторіть після питання.")
             return
         if audio_only:
             prompt = "Аудіо — останній фрагмент розмови. Екран не додано. Дай коротку відповідь у 1–3 реченнях."
         else:
-            prompt = USER_PROMPT if wav else "Зображення — поточний екран. Аудіо не додано."
+            prompt = USER_PROMPT if audio else "Зображення — поточний екран. Аудіо не додано."
+        if brief:
+            prompt += " Дай коротку підказку у 1–3 реченнях; код не диктуй."
         contents = [prompt]
         if jpeg is not None:
             contents.insert(0, types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"))
-        if wav:
-            contents.insert(0, types.Part.from_bytes(data=wav, mime_type="audio/wav"))
+        if audio:
+            contents.insert(0, types.Part.from_bytes(data=audio.data, mime_type=audio.mime_type))
 
+        if audio:
+            print(f"[audio] {audio.mime_type} {audio.original_seconds:.2f}s→{audio.sent_seconds:.2f}s "
+                  f"bytes={len(audio.data)} prepare={audio.prepare_seconds:.3f}s")
         prepared = time.perf_counter() - started
         models = list(dict.fromkeys((PRIMARY_MODEL, FALLBACK_MODEL)))
         for index, model in enumerate(models):
@@ -816,13 +804,14 @@ class Assistant:
                     continue
                 if generation != self._generation:
                     return
-                mode = "тільки аудіо" if audio_only else "екран + аудіо" if wav else "тільки екран"
+                mode = "тільки аудіо" if audio_only else "екран + аудіо" if audio else "тільки екран"
                 status = "Резервна модель" if index else "Очікую відповідь"
                 self._show(generation, f"⏳ {status} · {model}\n{mode}  ·  «Очистить» — скасувати")
                 # Only set thinking levels for models whose capabilities are known.
                 level = {"gemini-3.5-flash-lite": "minimal", "gemini-3.8-flash": "low"}.get(model)
                 config = types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
+                    system_instruction=SYSTEM_INSTRUCTION + (
+                        " Цього разу дай лише коротку підказку у 1–3 реченнях, без готового коду." if brief else ""),
                     thinking_config=types.ThinkingConfig(thinking_level=level) if level else None,
                 )
                 text = ""
@@ -873,13 +862,13 @@ class Assistant:
                     return
         self._show(generation, self.keys.unavailable_message())
 
-    def _run_realtime(self, generation, started, audio_only):
+    def _run_realtime(self, generation, started):
         text = ""
-        mode = "тільки аудіо" if audio_only else "екран + аудіо"
+        mode = "тільки аудіо"
         first_display = None
         request_monotonic = time.monotonic() - (time.perf_counter() - started)
         try:
-            for hint in self._realtime.stream(audio_only, lambda: generation != self._generation):
+            for hint in self._realtime.stream(lambda: generation != self._generation):
                 if generation != self._generation:
                     return True
                 if first_display is None:
@@ -904,68 +893,12 @@ class Assistant:
             return False
 
     def _run_live(self, generation, started, screen_only=False, capture_display_id=None, audio_only=False):
-        if self._realtime and self._realtime.enabled:
-            if self._run_realtime(generation, started, audio_only):
+        if audio_only and self._realtime and self._realtime.enabled:
+            if self._run_realtime(generation, started):
                 return
-        text = ""
-        jpeg = pcm = None
-        header = f"Live · {'тільки аудіо' if audio_only else 'екран + аудіо'} · {LIVE_MODEL}\n\n"
-        try:
-            if generation != self._generation:
-                return
-            screenshot = None if audio_only else self._capture_pool.submit(
-                capture_screenshot, self.capture_display_id if capture_display_id is None else capture_display_id,
-            )
-            pcm = self._audio.pcm_bytes()
-            jpeg = screenshot.result() if screenshot is not None else None
-            if generation != self._generation:
-                return
-            if not pcm:
-                raise ValueError("Аудіобуфер ще порожній")
-            prepared = time.perf_counter() - started
-            self._show(generation, header + "⏳ Очікую коротку підказку…  ·  «Очистить» — скасувати")
-            for entry in self.keys.candidates(LIVE_MODEL):
-                if generation != self._generation:
-                    return
-                if entry not in self.keys.candidates(LIVE_MODEL):
-                    continue
-                try:
-                    self._live.use_client(self.keys.client(entry))
-                    first_text = None
-                    last_render = 0.0
-                    with closing(self._live.stream(jpeg, pcm, lambda: generation != self._generation)) as stream:
-                        for delta in stream:
-                            now = time.perf_counter()
-                            if first_text is None:
-                                first_text = now - started
-                                self.keys.succeeded(entry)
-                                header = f"Live · {'тільки аудіо' if audio_only else 'екран + аудіо'} · перший текст {first_text:.2f} с\n\n"
-                            text += delta
-                            if now - last_render >= 0.04:
-                                self._show(generation, header + text)
-                                last_render = now
-                    if generation != self._generation:
-                        return
-                    elapsed = time.perf_counter() - started
-                    self._show(generation, header + text + f"\n\n✓ {elapsed:.2f} с  ·  ⌥X — деталі / код")
-                    print(f"[{LIVE_MODEL}] prepare={prepared:.2f}s first_text={first_text:.2f}s total={elapsed:.2f}s")
-                    return
-                except Exception as error:
-                    if credential_error(error):
-                        self.keys.failed(entry, LIVE_MODEL, error)
-                        if not text:
-                            continue
-                    raise
-            raise ValueError(self.keys.unavailable_message())
-        except Exception as error:
-            if generation != self._generation:
-                return
-            if text:
-                self._show(generation, header + text + f"\n\n⚠️ {error}  ·  ⌥X — повторити")
-            else:
-                print(f"[{LIVE_MODEL}] falling back to text stream: {self.keys.redact(error)}")
-                prepared_inputs = (jpeg, self._audio.wav_bytes(pcm)) if pcm else None
-                self._run(generation, started, screen_only, prepared_inputs, capture_display_id, audio_only=audio_only)
+        # Screen hints and failed/paused audio hints use REST; never open another Live session.
+        self._run(generation, started, screen_only, capture_display_id=capture_display_id,
+                  audio_only=audio_only, brief=True)
 
 
 # --- Global hotkeys -----------------------------------------------------------
@@ -1046,10 +979,10 @@ def main():
         KEY_Q: (lambda: assistant.analyze(live=True, audio_only=True), False),
     })
 
-    print(f"Recording (last {preferences.audio_seconds}s sent). Models: {PRIMARY_MODEL} → {FALLBACK_MODEL}")
-    print("⌥Q audio only · ⌥Z Live hint · ⌥X text/code · Ctrl+C quit")
+    print(f"One audio-only Live session · REST audio buffer {preferences.audio_seconds}s · {PRIMARY_MODEL} → {FALLBACK_MODEL}")
+    print("⌥Q audio only · ⌥Z screen hint · ⌥X text/code · Ctrl+C quit")
     controls.show()
-    overlay.show_text("Готов к работе.\n\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nАудіо та екран передаються у Gemini в фоні.\nКнопка «Поток: пауза / пуск» зупиняє фонову передачу.\n\n"
+    overlay.show_text("Готов к работе.\n\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nУ фоні працює одна голосова Live-сесія.\nЕкран надсилається лише кнопками ⌥Z / ⌥X / «Только экран».\nКнопка «Поток: пауза / пуск» зупиняє фонову передачу.\n\n"
                       "Окно можно перемещать за стандартный заголовок сверху.\n"
                       "Мониторы и длительность аудио выбираются в настройках.", reset_scroll=True)
     if not keys.entries():

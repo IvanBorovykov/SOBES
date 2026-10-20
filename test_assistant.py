@@ -11,6 +11,7 @@ import assistant
 from api_keys import ApiKey, KeyPool
 from test_api_keys import MemoryStore
 from realtime_hints import Hint
+from audio_payload import AudioPayload
 
 
 class AssistantTests(unittest.TestCase):
@@ -18,11 +19,9 @@ class AssistantTests(unittest.TestCase):
         self.client = Mock()
         self.overlay = Mock()
         self.audio = Mock()
-        self.audio.wav_bytes.return_value = b"wav"
+        self.payload = AudioPayload(b"OggS-test", "audio/ogg", 8, 7, .01)
+        self.audio.request_audio.return_value = self.payload
         self.audio.pcm_bytes.return_value = b"pcm"
-        live = patch.object(assistant, "LiveConnection")
-        self.live_factory = live.start()
-        self.addCleanup(live.stop)
         self.client_patch = patch("api_keys.genai.Client", return_value=self.client)
         self.client_factory = self.client_patch.start()
         self.addCleanup(self.client_patch.stop)
@@ -37,6 +36,7 @@ class AssistantTests(unittest.TestCase):
         self.addCleanup(models.stop)
         self.entry = ApiKey("test", "Тестовый", "test-placeholder-api-key")
         self.keys = KeyPool(MemoryStore([self.entry], self.entry.id))
+        self.keys.client(self.entry)
         self.app = assistant.Assistant(self.overlay, self.audio, self.keys)
         self.addCleanup(self.app.close)
         self.generate = self.client.models.generate_content_stream
@@ -57,8 +57,9 @@ class AssistantTests(unittest.TestCase):
     def test_clear_does_not_reconnect_a_key_in_live_cooldown(self):
         self.keys.failed_client(self.client, assistant.LIVE_MODEL,
                                 assistant.errors.APIError(429, {"message": "Quota"}))
+        self.app._realtime = Mock(enabled=True)
         self.app.clear()
-        self.live_factory.return_value.reset.assert_called_once_with(None)
+        self.app._realtime.reset.assert_called_once()
 
     def test_first_text_is_shown_before_stream_finishes(self):
         def stream():
@@ -75,7 +76,7 @@ class AssistantTests(unittest.TestCase):
     def test_screen_only_never_reads_or_uploads_audio(self):
         self.generate.return_value = (SimpleNamespace(text="OK") for _ in range(1))
         self.run_request(screen_only=True)
-        self.audio.wav_bytes.assert_not_called()
+        self.audio.request_audio.assert_not_called()
         contents = self.generate.call_args.kwargs["contents"]
         self.assertEqual(contents[0].inline_data.mime_type, "image/jpeg")
         self.assertEqual(len(contents), 2)
@@ -92,13 +93,13 @@ class AssistantTests(unittest.TestCase):
         def audio():
             self.assertTrue(capture_started.wait(timeout=1))
             audio_ready.set()
-            return b"wav"
+            return self.payload
 
         self.capture.side_effect = capture
-        self.audio.wav_bytes.side_effect = audio
+        self.audio.request_audio.side_effect = audio
         self.generate.return_value = (SimpleNamespace(text="OK") for _ in range(1))
         self.run_request()
-        self.assertEqual(self.generate.call_args.kwargs["contents"][0].inline_data.mime_type, "audio/wav")
+        self.assertEqual(self.generate.call_args.kwargs["contents"][0].inline_data.mime_type, "audio/ogg")
 
     def test_transient_errors_switch_models_without_sdk_retries(self):
         for code in (404, 500, 502, 503, 504):
@@ -148,10 +149,10 @@ class AssistantTests(unittest.TestCase):
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
         self.audio.pcm_bytes.assert_not_called()
-        self.app._live.stream.assert_not_called()
+        self.generate.assert_not_called()
         self.assertIn("Prepared answer", self.shown()[-1])
         self.assertIn("готово до натискання", self.shown()[-1])
-        self.assertTrue(realtime.stream.call_args.args[0])
+        self.assertTrue(callable(realtime.stream.call_args.args[0]))
 
     def test_realtime_partial_failure_does_not_replay_audio(self):
         def stream(*args):
@@ -162,74 +163,52 @@ class AssistantTests(unittest.TestCase):
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
         self.audio.pcm_bytes.assert_not_called()
-        self.app._live.stream.assert_not_called()
+        self.generate.assert_not_called()
         self.assertIn("Partial", self.shown()[-1])
 
-    def test_realtime_failure_uses_audio_only_on_demand_fallback(self):
+    def test_realtime_failure_uses_compressed_rest_without_opening_live_again(self):
         self.app._realtime = Mock(enabled=True)
         self.app._realtime.stream.side_effect = ConnectionError("not ready")
-        self.app._live.stream.return_value = iter(["Fallback"])
+        self.generate.return_value = iter([SimpleNamespace(text="Fallback")])
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
-        self.assertIsNone(self.app._live.stream.call_args.args[0])
+        self.client.aio.live.connect.assert_not_called()
+        contents = self.generate.call_args.kwargs["contents"]
+        self.assertEqual(contents[0].inline_data.mime_type, "audio/ogg")
+        self.assertEqual(contents[0].inline_data.data, self.payload.data)
         self.assertIn("Fallback", self.shown()[-1])
 
-    def test_audio_only_live_never_captures_screen(self):
+    def test_audio_only_without_realtime_never_captures_screen(self):
         self.capture.side_effect = AssertionError("Screen must not be captured")
-        self.app._live.stream.return_value = iter(["Audio hint"])
-        self.app._run_live(0, time.perf_counter(), audio_only=True)
-        self.app._live.stream.assert_called_once()
-        self.assertIsNone(self.app._live.stream.call_args.args[0])
-        self.capture.assert_not_called()
-        self.assertIn("Audio hint", self.shown()[-1])
-        self.assertIn("тільки аудіо", self.shown()[-1])
-
-    def test_audio_only_fallback_keeps_audio_snapshot_and_sends_no_image(self):
-        self.capture.side_effect = AssertionError("Screen must not be captured")
-        self.app._live.stream.side_effect = ConnectionError("offline")
-        self.generate.return_value = iter([SimpleNamespace(text="Audio fallback")])
+        self.generate.return_value = iter([SimpleNamespace(text="Audio hint")])
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
-        self.audio.pcm_bytes.assert_called_once()
-        self.audio.wav_bytes.assert_called_once_with(b"pcm")
         contents = self.generate.call_args.kwargs["contents"]
         self.assertEqual(len(contents), 2)
-        self.assertEqual(contents[0].inline_data.mime_type, "audio/wav")
+        self.assertEqual(contents[0].inline_data.mime_type, "audio/ogg")
         self.assertIn("Екран не додано", contents[1])
-        self.assertIn("Audio fallback", self.shown()[-1])
+        self.assertIn("Audio hint", self.shown()[-1])
 
     def test_empty_audio_only_buffer_does_not_contact_model_or_capture_screen(self):
-        self.audio.pcm_bytes.return_value = b""
-        self.audio.wav_bytes.return_value = None
+        self.audio.request_audio.return_value = None
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.generate.assert_not_called()
-        self.app._live.stream.assert_not_called()
+        self.client.aio.live.connect.assert_not_called()
         self.capture.assert_not_called()
 
-    def test_live_hint_shows_transcript_and_link_to_code_hotkey(self):
-        self.app._live.stream.return_value = (part for part in ["Коротка", " підказка"])
-        self.app._run_live(0, time.perf_counter())
-        self.assertIn("Коротка підказка", self.shown()[-1])
-        self.assertIn("деталі / код", self.shown()[-1])
-        self.generate.assert_not_called()
-
-    def test_live_failure_before_text_uses_regular_text_stream(self):
-        self.app._live.stream.side_effect = ConnectionError("offline")
-        self.generate.return_value = (SimpleNamespace(text="Text fallback") for _ in range(1))
-        self.app._run_live(0, time.perf_counter())
-        self.assertIn("Text fallback", self.shown()[-1])
-        self.capture.assert_called_once()
-        self.audio.wav_bytes.assert_called_once_with(b"pcm")
-
-    def test_live_failure_after_text_preserves_hint(self):
-        def stream():
-            yield "Підказка"
-            raise ConnectionError("offline")
-
-        self.app._live.stream.return_value = stream()
-        self.app._run_live(0, time.perf_counter())
-        self.assertIn("Підказка", self.shown()[-1])
-        self.generate.assert_not_called()
+    def test_screen_hint_is_separate_rest_request_without_touching_voice_session(self):
+        self.app._realtime = Mock(enabled=True)
+        self.generate.return_value = iter([SimpleNamespace(text="Screen hint")])
+        self.app._run_live(0, time.perf_counter(), capture_display_id=3)
+        self.capture.assert_called_once_with(3, fast=True)
+        self.app._realtime.stream.assert_not_called()
+        self.app._realtime.reset.assert_not_called()
+        self.client.aio.live.connect.assert_not_called()
+        contents = self.generate.call_args.kwargs["contents"]
+        self.assertEqual(contents[0].inline_data.mime_type, "audio/ogg")
+        self.assertEqual(contents[1].inline_data.mime_type, "image/jpeg")
+        self.assertIn("1–3", contents[-1])
+        self.assertIn("Screen hint", self.shown()[-1])
 
     def test_clear_closes_stream_and_does_not_redisplay_overlay(self):
         closed = []

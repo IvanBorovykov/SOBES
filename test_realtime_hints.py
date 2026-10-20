@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import threading
 import time
 import unittest
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from google.genai import types
 
 from api_keys import ApiKey, KeyPool
-from realtime_hints import Hint, RealtimeHints
+from realtime_hints import Channel, Hint, RealtimeHints
 from test_api_keys import MemoryStore
 
 
@@ -45,6 +46,17 @@ class FakeSession:
                 return
 
 
+class AudioQueueTests(unittest.TestCase):
+    def test_old_blocking_getter_cannot_consume_new_session_audio(self):
+        channel = Channel()
+        old_queue = channel.audio
+        channel.reset_audio()
+        channel.audio.put_nowait((1, b"new PCM"))
+        with self.assertRaises(queue.Empty):
+            old_queue.get(timeout=.01)
+        self.assertEqual(channel.audio.get_nowait(), (1, b"new PCM"))
+
+
 class RealtimeTests(unittest.TestCase):
     def setUp(self):
         self.sessions = []
@@ -67,17 +79,17 @@ class RealtimeTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         entry = ApiKey("test", "Test", "dummy-not-a-real-key")
         self.keys = KeyPool(MemoryStore([entry], entry.id))
-        self.capture = Mock(return_value=b"jpeg")
         self.engine = None
 
         def status():
-            if self.engine and all(ch.hint.ready for ch in self.engine._channels.values()):
+            if self.engine and self.engine._channel.hint.ready:
                 self.ready.set()
 
         self.engine = RealtimeHints(self.keys, "gemini-3.8-live", "Short answer",
-                                    self.capture, 3, status)
+                                    status)
         self.addCleanup(self.engine.close)
-        self.assertTrue(self.ready.wait(3), "Both isolated streams should connect")
+        status()
+        self.assertTrue(self.ready.wait(3), "One audio stream should connect")
 
     def emit(self, session, item):
         self.engine._loop.call_soon_threadsafe(session.messages.put_nowait, item)
@@ -85,11 +97,11 @@ class RealtimeTests(unittest.TestCase):
     def wait_hint(self, audio_only, predicate):
         deadline = time.monotonic() + 2
         with self.engine._condition:
-            while not predicate(self.engine._channels[audio_only].hint):
+            while not predicate(self.engine._channel.hint):
                 remaining = deadline - time.monotonic()
                 self.assertGreater(remaining, 0, "Expected transcript state")
                 self.engine._condition.wait(remaining)
-            return self.engine._channels[audio_only].hint
+            return self.engine._channel.hint
 
     def audio_session(self):
         return next(session for session in self.sessions if not any("video" in item for item in session.inputs))
@@ -102,9 +114,8 @@ class RealtimeTests(unittest.TestCase):
             self.assertEqual(next(item["audio"].data for item in session.inputs if "audio" in item), pcm)
         audio = self.audio_session()
         self.assertFalse(any("video" in item for item in audio.inputs))
-        screen = next(session for session in self.sessions if session is not audio)
-        self.assertIn("video", screen.inputs[0])
-        self.assertFalse(any("activity_start" in item or "activity_end" in item for item in screen.inputs))
+        self.assertEqual(len(self.sessions), 1)
+        self.assertFalse(any("activity_start" in item or "activity_end" in item for item in audio.inputs))
         config = self.client.aio.live.connect.call_args.kwargs["config"]
         self.assertEqual(config.realtime_input_config.automatic_activity_detection.silence_duration_ms, 350)
         self.assertFalse(config.realtime_input_config.automatic_activity_detection.disabled)
@@ -112,14 +123,14 @@ class RealtimeTests(unittest.TestCase):
         self.assertIsNone(config.thinking_config)
 
     def test_hotkey_flush_follows_already_queued_audio(self):
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         session = self.audio_session()
         finished = threading.Event()
 
         def submit():
             self.engine._begin_turn(channel)
             self.engine.offer_audio(bytes(640))
-            self.engine.request_flush(True)
+            self.engine.request_flush()
             finished.set()
 
         self.engine._loop.call_soon_threadsafe(submit)
@@ -134,7 +145,7 @@ class RealtimeTests(unittest.TestCase):
 
     def test_speech_resuming_during_flush_does_not_release_new_turn_gate(self):
         session = self.audio_session()
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         started = threading.Event()
         released = threading.Event()
         original = session.send_realtime_input
@@ -151,7 +162,7 @@ class RealtimeTests(unittest.TestCase):
 
         session.send_realtime_input = blocked
         self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
-        self.engine.request_flush(True)
+        self.engine.request_flush()
         self.assertTrue(started.wait(1))
         self.engine.offer_audio(b"\x00\x10" * 320)
         self.engine.offer_audio(b"\x00\x10" * 320)
@@ -164,10 +175,8 @@ class RealtimeTests(unittest.TestCase):
     def test_hotkey_reveals_cached_answer_without_uploading_again(self):
         self.emit(self.audio_session(), message("Already ready", True))
         self.wait_hint(True, lambda hint: hint.complete)
-        captures = self.capture.call_count
-        hints = list(self.engine.stream(True, lambda: False))
+        hints = list(self.engine.stream( lambda: False))
         self.assertEqual(hints[-1].text, "Already ready")
-        self.assertEqual(self.capture.call_count, captures)
         self.assertFalse(any("audio" in item for session in self.sessions for item in session.inputs))
 
     def test_new_speech_invalidates_previous_answer(self):
@@ -180,7 +189,7 @@ class RealtimeTests(unittest.TestCase):
         self.emit(session, message(activity=types.VoiceActivityType.ACTIVITY_END))
         self.emit(session, message("New", True))
         self.wait_hint(True, lambda hint: hint.complete)
-        self.assertEqual(list(self.engine.stream(True, lambda: False))[-1].text, "New")
+        self.assertEqual(list(self.engine.stream( lambda: False))[-1].text, "New")
 
     def test_late_input_and_output_transcripts_do_not_erase_the_answer(self):
         session = self.audio_session()
@@ -192,7 +201,7 @@ class RealtimeTests(unittest.TestCase):
         self.assertTrue(hint.complete)
 
     def test_late_interim_transcript_does_not_erase_completed_answer(self):
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         self.engine._receive_message(channel, message("Answer", True))
         self.engine._receive_message(channel, types.LiveServerMessage(server_content=types.LiveServerContent(
             interim_input_transcription=types.Transcription(text="Late interim input"))))
@@ -200,7 +209,7 @@ class RealtimeTests(unittest.TestCase):
         self.assertTrue(channel.hint.complete)
 
     def test_old_output_during_new_speech_is_not_shown_as_new_answer(self):
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         self.engine._receive_message(channel, message("Old", True))
         self.engine.offer_audio(b"\x00\x10" * 320)
         self.engine.offer_audio(b"\x00\x10" * 320)
@@ -213,7 +222,7 @@ class RealtimeTests(unittest.TestCase):
         self.assertEqual(channel.hint.text, "New answer")
 
     def test_delayed_server_end_does_not_release_gate_for_new_local_speech(self):
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         self.engine.offer_audio(b"\x00\x10" * 320)
         self.engine.offer_audio(b"\x00\x10" * 320)
         self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_END))
@@ -221,32 +230,13 @@ class RealtimeTests(unittest.TestCase):
         self.assertTrue(channel.awaiting_end)
         self.assertFalse(channel.hint.text)
 
-    def test_screen_change_never_returns_cached_answer_from_previous_task(self):
-        channel = self.engine._channels[False]
-        self.engine._receive_message(channel, message("Old task", True))
-        with self.engine._condition:
-            channel.screen_stale = True
-        with self.assertRaisesRegex(ConnectionError, "Экран изменился"):
-            list(self.engine.stream(False, lambda: False))
-        self.engine._receive_message(channel, message("Late old output"))
-        self.assertEqual(channel.hint.text, "Old task")
-        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
-        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_END))
-        self.engine._receive_message(channel, message("New task", True))
-        self.assertEqual(list(self.engine.stream(False, lambda: False))[-1].text, "New task")
-
-    def test_meaningful_frame_change_is_detected_but_tiny_changes_are_ignored(self):
-        self.assertTrue(self.engine._changed_frame(bytes(128*72), bytes([255])*(128*72)))
-        tiny = bytes([255]) + bytes(128*72-1)
-        self.assertFalse(self.engine._changed_frame(bytes(128*72), tiny))
-
     def test_speech_onset_invalidates_cached_response_before_server_transcription(self):
         session = self.audio_session()
         self.emit(session, message("Old", True))
         self.wait_hint(True, lambda hint: hint.complete)
         self.engine.offer_audio(b"\x00\x10" * 320)
         self.engine.offer_audio(b"\x00\x10" * 320)
-        hint = self.engine._channels[True].hint
+        hint = self.engine._channel.hint
         self.assertFalse(hint.text)
         self.assertFalse(hint.complete)
 
@@ -254,16 +244,16 @@ class RealtimeTests(unittest.TestCase):
         self.engine.set_enabled(False).result(3)
         self.engine.offer_audio(b"secret audio")
         self.assertTrue(all(session.closed.is_set() for session in self.sessions))
-        self.assertTrue(all(channel.audio.empty() for channel in self.engine._channels.values()))
+        self.assertTrue(self.engine._channel.audio.empty())
         with self.assertRaisesRegex(ConnectionError, "приостановлена"):
-            list(self.engine.stream(True, lambda: False))
+            list(self.engine.stream( lambda: False))
 
     def test_overflow_discards_cached_answer_instead_of_building_an_unbounded_backlog(self):
         # Perform as one event-loop callback so the sender cannot drain it mid-test.
         done = threading.Event()
 
         def flood():
-            channel = self.engine._channels[True]
+            channel = self.engine._channel
             for _ in range(60):
                 self.engine.offer_audio(b"pcm")
             self.assertLessEqual(channel.audio.qsize(), 50)
@@ -274,19 +264,8 @@ class RealtimeTests(unittest.TestCase):
         self.engine._loop.call_soon_threadsafe(flood)
         self.assertTrue(done.wait(1))
 
-    def test_display_change_clears_screen_context_without_resetting_audio_only(self):
-        audio = self.audio_session()
-        self.emit(audio, message("Keep audio", True))
-        self.wait_hint(True, lambda hint: hint.complete)
-        old_screen = next(session for session in self.sessions if session is not audio)
-        self.engine.set_display(9)
-        self.assertTrue(old_screen.closed.wait(2))
-        self.assertFalse(audio.closed.is_set())
-        self.assertEqual(self.engine._channels[True].hint.text, "Keep audio")
-        self.assertFalse(self.engine._channels[False].hint.text)
-
     def test_an_inflight_question_is_allowed_to_finish_after_the_idle_grace(self):
-        channel = self.engine._channels[True]
+        channel = self.engine._channel
         self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
         session = self.audio_session()
 
@@ -297,12 +276,12 @@ class RealtimeTests(unittest.TestCase):
         timer = threading.Timer(1, answer)
         self.addCleanup(timer.cancel)
         timer.start()
-        self.assertEqual(list(self.engine.stream(True, lambda: False))[-1].text, "Ready after idle grace")
+        self.assertEqual(list(self.engine.stream( lambda: False))[-1].text, "Ready after idle grace")
 
     def test_initial_wait_times_out_even_without_any_state_changes(self):
         started = time.monotonic()
         with self.assertRaises(TimeoutError):
-            list(self.engine.stream(True, lambda: False))
+            list(self.engine.stream( lambda: False))
         self.assertLess(time.monotonic() - started, 1.5)
 
 
