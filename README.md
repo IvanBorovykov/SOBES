@@ -1,6 +1,6 @@
 # Interview assistant
 
-Текущая версия: **v0.3.0 — одна голосовая сессия и сжатое аудио**.
+Текущая версия: **v0.3.1 — одна голосовая сессия, сжатое аудио и защита от обрыва ответа**.
 Замеры и ограничения: [LATENCY.md](LATENCY.md).
 
 **v0.1.0 — первая рабочая версия.** В пользовательском тесте первый текст
@@ -127,7 +127,13 @@ model; Google requires omitting `thinking_level` for 3.8 Live, and the app does 
 Gemini 2.5 uses `thinking_budget=0`.
 These options are model-specific ([Google documentation](https://ai.google.dev/gemini-api/docs/live-api/capabilities)).
 
-The voice hint shows output audio transcription without playing audio. Background
+The voice hint shows output audio transcription without playing audio. Live uses
+`activity_handling=NO_INTERRUPTION`: new speech/noise does not cancel an answer
+already being generated. The local speech detector also preserves that answer
+until `turn_complete`. The final text is retained for an active viewer across the
+next question boundary. Explicit **Очистить**, **Пауза потока** or a new request
+still cancel/change the visible operation. Unexpected server/network failures are
+reported with already displayed text preserved. Background
 disconnects, expired sessions and quota errors reconnect using eligible keys;
 permission failures remain scoped to the model. The continuous path waits at most
 0.8 seconds for an idle stream with no text, or 2.5 seconds for a known in-flight

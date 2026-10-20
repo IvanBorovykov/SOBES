@@ -122,6 +122,88 @@ class RealtimeTests(unittest.TestCase):
         self.assertEqual(config.media_resolution, types.MediaResolution.MEDIA_RESOLUTION_LOW)
         self.assertIsNone(config.thinking_config)
 
+    def test_no_interruption_is_requested_from_the_server(self):
+        config = self.client.aio.live.connect.call_args.kwargs["config"]
+        self.assertEqual(config.realtime_input_config.activity_handling, types.ActivityHandling.NO_INTERRUPTION)
+
+    def test_noise_and_server_activity_do_not_truncate_visible_stream(self):
+        session = self.audio_session()
+        self.emit(session, message("Начало"))
+        self.wait_hint(True, lambda hint: bool(hint.text))
+        stream = self.engine.stream(lambda: False)
+        self.assertEqual(next(stream).text, "Начало")
+        original_turn = self.engine._channel.hint.turn
+        self.engine.offer_audio(b"\x00\x10" * 320)
+        self.engine.offer_audio(b"\x00\x10" * 320)
+        self.emit(session, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        self.emit(session, message(" и продолжение"))
+        self.emit(session, message(" до конца.", True))
+        result = list(stream)
+        self.assertEqual(result[-1].text, "Начало и продолжение до конца.")
+        self.assertTrue(result[-1].complete)
+        self.assertEqual(result[-1].turn, original_turn)
+        # A genuinely new question is accepted after the completed answer.
+        self.emit(session, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        self.wait_hint(True, lambda hint: not hint.text and hint.turn != original_turn)
+
+    def test_generation_complete_does_not_release_answer_before_turn_complete(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message("First"))
+        self.engine._receive_message(channel, types.LiveServerMessage(
+            server_content=types.LiveServerContent(generation_complete=True)))
+        self.assertFalse(channel.hint.complete)
+        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        self.assertEqual(channel.hint.text, "First")
+        self.engine._receive_message(channel, message(" last", True))
+        self.assertEqual(channel.hint.text, "First last")
+        self.assertTrue(channel.hint.complete)
+
+    def test_unexpected_interruption_is_reported_without_erasing_partial_answer(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message("Partial"))
+        with self.assertRaisesRegex(ConnectionError, "Сервер прервал"):
+            self.engine._receive_message(channel, message(interrupted=True))
+        self.assertEqual(channel.hint.text, "Partial")
+        self.assertFalse(channel.hint.complete)
+
+    def test_queued_answer_after_concurrent_speech_is_a_separate_turn(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message("First"))
+        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        self.engine._receive_message(channel, message(" answer", True))
+        first_turn = channel.hint.turn
+        self.engine._receive_message(channel, message("Second answer"))
+        self.assertEqual(channel.hint.text, "Second answer")
+        self.assertNotEqual(channel.hint.turn, first_turn)
+        self.assertFalse(channel.hint.complete)
+        self.assertEqual(channel.last_completed.text, "First answer")
+
+    def test_visible_stream_receives_final_tail_even_if_next_speech_arrives_first(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message("First"))
+        stream = self.engine.stream(lambda: False)
+        self.assertEqual(next(stream).text, "First")
+        self.engine._receive_message(channel, message(" final tail", True))
+        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        self.engine._last_loud -= 1
+        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_END))
+        self.engine._receive_message(channel, message("Next question's answer"))
+        hints = list(stream)
+        self.assertEqual(hints[-1].text, "First final tail")
+        self.assertTrue(hints[-1].complete)
+
+    def test_delayed_audio_part_does_not_open_gate_for_old_response(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message("Old", True))
+        self.engine.offer_audio(b"\x00\x10" * 320)
+        self.engine.offer_audio(b"\x00\x10" * 320)
+        self.engine._receive_message(channel, types.LiveServerMessage(server_content=types.LiveServerContent(
+            model_turn=types.Content(parts=[types.Part(inline_data=types.Blob(data=b"audio", mime_type="audio/pcm"))]),
+            output_transcription=types.Transcription(text="Old pending"), turn_complete=True)))
+        self.assertTrue(channel.awaiting_end)
+        self.assertFalse(channel.hint.text)
+        self.assertFalse(channel.hint.complete)
+
     def test_hotkey_flush_follows_already_queued_audio(self):
         channel = self.engine._channel
         session = self.audio_session()
@@ -193,10 +275,10 @@ class RealtimeTests(unittest.TestCase):
 
     def test_late_input_and_output_transcripts_do_not_erase_the_answer(self):
         session = self.audio_session()
-        self.emit(session, message("First", True))
-        self.wait_hint(True, lambda hint: hint.complete)
+        self.emit(session, message("First"))
+        self.wait_hint(True, lambda hint: bool(hint.text))
         self.emit(session, message(input_text="Late final input"))
-        self.emit(session, message(" tail"))
+        self.emit(session, message(" tail", True))
         hint = self.wait_hint(True, lambda hint: hint.text == "First tail")
         self.assertTrue(hint.complete)
 

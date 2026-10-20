@@ -29,7 +29,9 @@ class Channel:
     def __init__(self):
         self.audio = queue.Queue(maxsize=50)  # At most one second, never an ever-growing upload.
         self.hint = Hint()
+        self.last_completed = None
         self.receiving = False
+        self.generating = False
         self.awaiting_end = False
         self.server_speech = False
         self.flushed_turn = -1
@@ -58,6 +60,7 @@ class RealtimeHints:
             media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
             system_instruction=instruction,
             realtime_input_config=types.RealtimeInputConfig(
+                activity_handling=types.ActivityHandling.NO_INTERRUPTION,
                 automatic_activity_detection=types.AutomaticActivityDetection(
                     disabled=False, prefix_padding_ms=20, silence_duration_ms=350,
                 ),
@@ -90,6 +93,8 @@ class RealtimeHints:
             self._on_status()
 
     def _invalidate(self, channel, error=""):
+        channel.last_completed = None
+        channel.generating = False
         channel.receiving = False
         channel.awaiting_end = False
         channel.server_speech = False
@@ -97,6 +102,8 @@ class RealtimeHints:
                       updated_at=0, complete=False, ready=False, error=error, vad_end_at=0)
 
     def _begin_turn(self, channel):
+        if channel.generating:
+            return  # Finish the current answer before accepting another speech boundary.
         channel.receiving = True
         channel.awaiting_end = True
         self._publish(channel, turn=channel.hint.turn + 1, text="", first_text_at=0,
@@ -202,16 +209,30 @@ class RealtimeHints:
             # Input/interim transcripts are independent of output ordering. They
             # cannot identify a new turn; local speech and server VAD own boundaries.
             if content.interrupted:
-                channel.receiving = channel.awaiting_end
-                self._publish(channel, turn=channel.hint.turn + 1, text="", first_text_at=0, complete=False)
+                # An unexpected server interruption is a failure, never a successful short answer.
+                raise ConnectionError("Сервер прервал ответ. Полученный текст сохранён; повторите запрос.")
+            has_output = content.model_turn or (content.output_transcription and content.output_transcription.text)
+            if has_output and channel.hint.complete:
+                # NO_INTERRUPTION can queue speech heard during the previous response.
+                # Its next answer may start without another speech-start event.
+                self._publish(channel, turn=channel.hint.turn + 1, text="", first_text_at=0,
+                              updated_at=0, complete=False, vad_end_at=0)
+                channel.awaiting_end = False
+            if content.model_turn and not channel.awaiting_end:
+                channel.generating = True
             if (content.output_transcription and content.output_transcription.text
                     and not channel.awaiting_end):
+                channel.generating = True
                 channel.receiving = True
                 self._publish(channel, text=channel.hint.text + content.output_transcription.text,
                               first_text_at=channel.hint.first_text_at or now, updated_at=now, error="")
-            if (content.turn_complete or content.generation_complete) and not channel.awaiting_end:
+            # generation_complete can precede the final turn boundary. Keep the answer
+            # protected until turn_complete, so intervening noise cannot clear its text.
+            if content.turn_complete and not channel.awaiting_end:
+                channel.generating = False
                 channel.receiving = False
                 self._publish(channel, complete=True)
+                channel.last_completed = channel.hint
 
     async def _receiver(self, channel, session):
         while True:
@@ -298,8 +319,11 @@ class RealtimeHints:
                 raise TimeoutError("Поток ещё не подготовил свежий ответ")
             with self._condition:
                 hint = channel.hint
+                completed = channel.last_completed
                 if not self.enabled or self._closed:
                     raise ConnectionError("Фоновая передача приостановлена")
+                if has_text and completed and completed.turn == turn:
+                    hint = completed
                 if not hint.ready:
                     raise ConnectionError(hint.error or "Фоновый поток ещё подключается")
                 if hint.error:
