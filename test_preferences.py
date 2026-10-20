@@ -27,8 +27,10 @@ class PreferencesTests(unittest.TestCase):
         preferences.overlay_display = "monitor-b"
         preferences.controls_display = "monitor-a"
         preferences.overlay_origin = [-100, 1200]
+        preferences.audio_source = "system"
         preferences.save()
         restored = Preferences(self.path)
+        self.assertEqual(restored.audio_source, "system")
         self.assertEqual(restored.context_files, ["/tmp/guide.md"])
         self.assertEqual(restored.audio_seconds, 45)
         self.assertEqual(restored.capture_display, "monitor-a")

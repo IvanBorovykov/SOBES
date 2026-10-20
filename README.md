@@ -1,6 +1,6 @@
 # Interview assistant
 
-Текущая версия: **v0.4.0 — голосовые вопросы по файлам**.
+Текущая версия: **v0.4.1 — прямой звук звонка для голосовых подсказок**.
 Замеры и ограничения: [LATENCY.md](LATENCY.md).
 
 **v0.1.0 — первая рабочая версия.** В пользовательском тесте первый текст
@@ -49,6 +49,7 @@ Open **Настройки…** (or **⌘,** while the app is focused) to choose 
 - the display for the answer window;
 - the display for the toolbar;
 - the display to capture and send to Gemini;
+- the audio source: microphone or direct computer audio (calls/videos);
 - the recent audio duration: 8, 15, 30, 45 or 60 seconds, default **30 seconds**.
 
 Press **Применить** to save and apply changes without restarting. The toolbar always
@@ -71,8 +72,7 @@ windows are brought back to an available display.
 These are the four global shortcuts. Use **Только экран** to send a screenshot
 without audio, **Очистить** to cancel and clear, and **↑ / ↓** or the mouse/trackpad
 to scroll. The shortcuts work while another app is focused.
-**Только звук** uses the current audio input. It does not automatically mix
-microphone and system audio. There is exactly **one warm audio-only Live session**.
+**Только звук** uses the source selected in settings. It does not mix microphone and system audio. There is exactly **one warm audio-only Live session**.
 No image is ever sent to it. ⌥Z and ⌥X make independent REST requests with a fresh
 screenshot and the recent audio buffer; they do not reset or contaminate the voice
 context. ⌥Z requests a short hint; ⌥X requests the complete explanation/code.
@@ -92,6 +92,16 @@ context. ⌥Z requests a short hint; ⌥X requests the complete explanation/code
 Список путей сохраняется между запусками. Извлечённый текст кешируется в памяти и перечитывается после изменения файла. Полный текст выбранных материалов и аудиовопрос отправляются Gemini только при **⌥A**, отдельным запросом без скриншота. Удаление из списка не удаляет оригинал. Другие режимы не используют эти файлы.
 
 Этот режим использует `gemini-3.5-flash-lite` с low thinking, с резервом `gemini-3.8-flash`. Тайм-аут до первых слов допускает переход на резерв; после начала ответа повторной отправки нет. Для обработки документов тайм-аут отдельного запроса увеличен с 20 до 60 секунд. Скорость зависит от объёма материалов и API; это не обещание ответа за секунду. При отсутствии ответа в документах модель получает указание сказать об этом явно; ссылки помогают проверить результат.
+
+### Звук звонка или видео
+
+Откройте **Настройки… → Что слушать → Звук компьютера → Применить**. Теперь ⌥Q получает голос собеседника напрямую, включая работу в наушниках. Этот источник также используется для аудиобуфера ⌥A/⌥Z/⌥X. Микрофон в этом режиме не записывается: чтобы задать вопрос своим голосом, выберите «Микрофон».
+
+Источник сохраняется между запусками и показывается на панели. Переключение очищает буфер, отменяет старый ответ и начинает свежий Live-контекст. Длительность 8–60 секунд влияет на REST-буфер, а не на непрерывный Live-поток ⌥Q.
+
+Звук компьютера захватывается через [ScreenCaptureKit macOS](https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration/capturesaudio), без BlackHole и изменения системного устройства вывода. При запросе macOS разрешите запись экрана и системного аудио. Для этого режима helper передаёт только PCM 16 кГц mono, без кадров экрана. Захватывается общий звук приложений, включая другие открытые видео и уведомления; для чистого вопроса остановите лишнее воспроизведение. Защищённый контент может быть недоступен для захвата.
+
+Первый запуск собирает небольшой Swift helper в фоне (нужны Command Line Tools: `xcode-select --install`). Пока он подключается или если разрешение отклонено, запрос покажет состояние/ошибку. После выдачи разрешения повторно нажмите «Применить». Автоматического возврата к микрофону нет. Проба «системный тестовый звук → Gemini Live» завершилась правильным полным ответом; распознавание реального звонка ещё нужно проверить на вашей речи.
 
 Continuous audio starts with the app: **audio is sent to Gemini while people speak**.
 Screenshots are now captured and sent **only on explicit screen requests** (⌥Z,
@@ -185,7 +195,4 @@ Run the local checks without recording audio or contacting Gemini:
 .venv/bin/python -m unittest -v
 ```
 
-The default input is the microphone. With headphones on, the mic won't pick up the interviewer.
-To capture the call audio instead, install BlackHole (`brew install blackhole-2ch`), create a
-Multi-Output Device in Audio MIDI Setup (headphones + BlackHole), set it as the system output,
-and run with `AUDIO_DEVICE="BlackHole"`.
+By default, existing installations keep microphone input. Select direct computer audio in settings for calls/videos. `AUDIO_DEVICE` only selects a microphone/PortAudio input in microphone mode; it does not override the saved source.

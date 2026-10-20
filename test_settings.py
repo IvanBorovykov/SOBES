@@ -74,7 +74,7 @@ class DisplaySettingsTests(unittest.TestCase):
         self.controls = SimpleNamespace(
             _preferences=preferences, _overlay=SimpleNamespace(_panel=Panel(560, 792)),
             _panel=Panel(620, 210), _assistant=SimpleNamespace(capture_display_id=None),
-            _audio=Mock(), update_status=Mock(),
+            _audio=Mock(source="microphone", error=""), update_status=Mock(),
         )
         self.displays = [
             {"key": "primary", "id": 1, "screen": SimpleNamespace(visibleFrame=lambda: NSMakeRect(0, 0, 1728, 1084))},

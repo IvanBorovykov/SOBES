@@ -20,7 +20,7 @@ class AssistantTests(unittest.TestCase):
     def setUp(self):
         self.client = Mock()
         self.overlay = Mock()
-        self.audio = Mock()
+        self.audio = Mock(error="")
         self.payload = AudioPayload(b"OggS-test", "audio/ogg", 8, 7, .01)
         self.audio.request_audio.return_value = self.payload
         self.audio.pcm_bytes.return_value = b"pcm"
@@ -65,6 +65,22 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(self.generate.call_args.kwargs["model"], assistant.PRIMARY_MODEL)
         self.assertEqual(self.generate.call_args.kwargs["config"].http_options.timeout, 60_000)
         self.assertIn("F1: policy.md", self.shown()[-1])
+
+    def test_live_request_reports_capture_error_instead_of_revealing_cached_answer(self):
+        self.audio.error = 'Нет разрешения на системное аудио'
+        with patch.object(assistant.threading, 'Thread') as worker:
+            self.app.analyze(live=True, audio_only=True)
+        worker.assert_not_called()
+        self.assertIn(self.audio.error, self.shown()[-1])
+
+    def test_file_question_reports_capture_error_before_reading_audio(self):
+        self.app.context_files = ('/guide.md',)
+        self.audio.error = 'Подключаю звук компьютера'
+        with patch.object(assistant.threading, 'Thread') as worker:
+            self.app.ask_files()
+        worker.assert_not_called()
+        self.audio.pcm_bytes.assert_not_called()
+        self.assertIn(self.audio.error, self.shown()[-1])
 
     def test_file_extraction_cannot_shift_audio_question_out_of_buffer(self):
         self.app.context_files = ("/fake.md",)

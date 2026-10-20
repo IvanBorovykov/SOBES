@@ -67,6 +67,7 @@ from PyObjCTools import AppHelper
 
 from realtime_hints import RealtimeHints
 from audio_payload import prepare_audio
+from system_audio import SystemAudio
 from file_context import FileContext
 from file_context_ui import FileContextPanel
 from api_keys import KeychainError, KeychainStore, KeyPool, credential_error
@@ -124,11 +125,18 @@ HOTKEY_MODIFIERS = Quartz.kCGEventFlagMaskAlternate
 class AudioRing:
     """Keep up to 60 seconds locally; send only the selected recent audio window."""
 
-    def __init__(self):
+    def __init__(self, source="microphone"):
         self._chunks = deque(maxlen=-(-MAX_AUDIO_SECONDS * SAMPLE_RATE // CHUNK_FRAMES))
         self._seconds = BUFFER_SECONDS
         self._lock = threading.Lock()
         self._listeners = []
+        self._stream = self._pa = self._system = None
+        self.source = None
+        self.error = ""
+        self.on_status = None
+        self.set_source(source)
+
+    def _start_microphone(self):
         self._pa = pyaudio.PyAudio()
         self._stream = self._pa.open(
             format=pyaudio.paInt16,
@@ -139,6 +147,45 @@ class AudioRing:
             frames_per_buffer=CHUNK_FRAMES,
             stream_callback=self._on_audio,
         )
+
+    def set_source(self, source):
+        if source not in ("microphone", "system"):
+            raise ValueError("Выберите микрофон или звук компьютера")
+        if source == self.source and not self.error:
+            return
+        self.close()
+        self.clear()
+        self.source = source
+        self.error = ""
+        if source == "system":
+            self.device_name = "Звук компьютера — звонки / видео"
+            self.error = "Подключаю звук компьютера… Проверьте запрос разрешения macOS."
+            self._system = SystemAudio(lambda data: self._on_audio(data, 320, None, 0), self._source_error, self._source_ready)
+        else:
+            self._start_microphone()
+
+    def _source_error(self, message):
+        self.error = message
+        self.clear()
+        if self.on_status:
+            self.on_status()
+
+    def _source_ready(self):
+        self.error = ""
+        if self.on_status:
+            self.on_status()
+
+    def close(self):
+        if self._system:
+            self._system.close()
+            self._system = None
+        if self._stream:
+            self._stream.stop_stream()
+            self._stream.close()
+            self._stream = None
+        if self._pa:
+            self._pa.terminate()
+            self._pa = None
 
     def _find_device(self):
         if not AUDIO_DEVICE:
@@ -169,6 +216,8 @@ class AudioRing:
             self._listeners.remove(listener)
 
     def pcm_bytes(self):
+        if getattr(self, "error", ""):
+            raise ValueError(self.error)
         with self._lock:
             return b"".join(self._chunks)[-self._seconds * SAMPLE_RATE * SAMPLE_WIDTH:]
 
@@ -375,7 +424,7 @@ class SettingsPanel(NSObject):
         self._apply = apply
         self._move = move
         self._panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100, 100, 640, 480), NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
+            NSMakeRect(100, 100, 640, 554), NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered, False,
         )
         self._panel.setTitle_("Настройки помощника")
@@ -387,6 +436,7 @@ class SettingsPanel(NSObject):
         content = self._panel.contentView()
         self._popups = {}
         for name, title, y in (
+            ("audio_source", "Что слушать — микрофон или собеседника в звонке", 514),
             ("overlay_display", "Где показывать подсказку", 440),
             ("controls_display", "Где показывать панель с кнопками", 366),
             ("capture_display", "Какой экран отправлять модели", 292),
@@ -429,6 +479,14 @@ class SettingsPanel(NSObject):
     @objc.python_method
     def show(self, preferences, audio_name):
         displays = get_displays()
+        popup = self._popups["audio_source"]
+        popup.removeAllItems()
+        for value, title in (("microphone", "Микрофон — мой голос / человек рядом"),
+                             ("system", "Звук компьютера — собеседник в звонке / видео")):
+            popup.addItemWithTitle_(title)
+            popup.lastItem().setRepresentedObject_(value)
+            if preferences.audio_source == value:
+                popup.selectItem_(popup.lastItem())
         for name in ("overlay_display", "controls_display", "capture_display"):
             popup = self._popups[name]
             popup.removeAllItems()
@@ -450,8 +508,8 @@ class SettingsPanel(NSObject):
                 popup.selectItem_(popup.lastItem())
         self._info.setStringValue_(
             f"Источник звука: {audio_name}.\n"
-            "8 с — меньше данных, но вопрос может обрезаться. 30 с — больше контекста. "
-            "Длительность влияет на объём запроса, а не задаёт время ожидания."
+            "Звук компьютера слышит звонок даже в наушниках; микрофон в этом режиме не передаётся. "
+            "8 с могут обрезать вопрос; для длинных вопросов выберите 30–60 с."
         )
         self._panel.center()
         self._panel.makeKeyAndOrderFront_(None)
@@ -554,6 +612,7 @@ class Controls(NSObject):
     @objc.python_method
     def configure(self, preferences, overlay, audio, assistant):
         self._preferences, self._overlay, self._audio, self._assistant = preferences, overlay, audio, assistant
+        audio.on_status = lambda: AppHelper.callAfter(self.update_status)
         self._settings = SettingsPanel.alloc().initWithApply_move_(self.apply_preferences, self.move_overlay)
         assistant.context_files = tuple(preferences.context_files)
         self._files_panel = FileContextPanel.alloc().initWithPreferences_changed_(preferences, self.files_changed)
@@ -636,7 +695,8 @@ class Controls(NSObject):
                             ("controls_display", "Панель кнопок")):
             display = displays.get(getattr(self._preferences, name))
             lines.append(f"{title}: {display['title'] if display else 'экран отключён — откройте настройки'}")
-        lines.append(f"Аудио: {self._audio.device_name} · буфер для ответа / резерва {self._preferences.audio_seconds} с")
+        audio_error = getattr(self._audio, "error", "")
+        lines.append(f"Аудио: {audio_error or self._audio.device_name} · буфер {self._preferences.audio_seconds} с")
         lines.append(self._assistant.keys.status())
         realtime = getattr(self._assistant, "_realtime", None)
         lines.append(realtime.status() if realtime else "Поток: запуск…")
@@ -690,6 +750,14 @@ class Controls(NSObject):
         keys = {display["key"] for display in get_displays()}
         if any(values[name] not in keys for name in ("overlay_display", "controls_display", "capture_display")):
             raise ValueError("Выберите подключённый экран в каждом списке.")
+        if values.get("audio_source", self._preferences.audio_source) != self._audio.source or self._audio.error:
+            self._assistant.clear()
+            try:
+                self._audio.set_source(values.get("audio_source", self._preferences.audio_source))
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                self._audio._source_error(str(error))
+                raise ValueError(str(error)) from error
+            self._assistant.clear()
         for kind in ("overlay", "controls"):
             if values[f"{kind}_display"] != getattr(self._preferences, f"{kind}_display"):
                 setattr(self._preferences, f"{kind}_origin", None)
@@ -749,6 +817,9 @@ class Assistant:
             self._overlay.show_text("Добавьте материалы кнопкой «Файлы…», задайте вопрос вслух и нажмите ⌥A.",
                                     reset_scroll=True)
             return
+        if getattr(self._audio, "error", ""):
+            self._overlay.show_text("⚠️ " + self._audio.error, reset_scroll=True)
+            return
         started = time.perf_counter()
         self._overlay.show_text("⏳ Готую голосове питання та контекст файлів…", reset_scroll=True)
         threading.Thread(target=self._run, args=(generation, started, False),
@@ -761,6 +832,9 @@ class Assistant:
 
     def analyze(self, screen_only=False, live=False, audio_only=False):
         self._generation += 1
+        if not screen_only and getattr(self._audio, "error", ""):
+            self._overlay.show_text("⚠️ " + self._audio.error, reset_scroll=True)
+            return
         started = time.perf_counter()
         preparing = "Відкриваю потокову підказку" if live and audio_only and self._realtime and self._realtime.enabled else (
             "Готую аудіо без екрана" if audio_only else "Готую знімок екрана")
@@ -1011,7 +1085,7 @@ def main():
         return
     preferences = Preferences()
     overlay = Overlay()
-    audio = AudioRing()
+    audio = AudioRing(preferences.audio_source)
     assistant = Assistant(overlay, audio, keys)
     controls = Controls.alloc().initWithActions_({
         "streaming": assistant.toggle_realtime,
@@ -1046,6 +1120,7 @@ def main():
     try:
         AppHelper.runEventLoop(installInterrupt=True)
     finally:
+        audio.close()
         assistant.close()
 
 
