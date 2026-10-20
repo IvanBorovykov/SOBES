@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+settings.json
+*.wav
+*.pcm
+*.mp3
+captures/
+screenshots/
