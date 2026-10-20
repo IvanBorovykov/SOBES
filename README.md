@@ -1,6 +1,6 @@
 # Interview assistant
 
-Текущая версия: **v0.3.1 — одна голосовая сессия, сжатое аудио и защита от обрыва ответа**.
+Текущая версия: **v0.4.0 — голосовые вопросы по файлам**.
 Замеры и ограничения: [LATENCY.md](LATENCY.md).
 
 **v0.1.0 — первая рабочая версия.** В пользовательском тесте первый текст
@@ -39,7 +39,7 @@ fallback model where available. Turn off the checkbox to use only the active key
 `GEMINI_API_KEY` remains an optional import for existing setups; save that profile
 in the window once to keep it across launches without the environment variable.
 
-The floating toolbar provides **Только звук**, **Подсказка**, **Ответ / код**, **Только экран**,
+The floating toolbar provides **Вопрос по файлам**, **Файлы…**, **Только звук**, **Подсказка**, **Ответ / код**, **Только экран**,
 **Очистить**, **Пауза потока / Включить поток**, **↑ / ↓** and **Настройки…**. Keyboard shortcuts are written directly
 on the buttons. Both the toolbar and answer window move by dragging their native
 macOS title bars. Positions are saved. The answer accepts mouse/trackpad scrolling.
@@ -63,11 +63,12 @@ windows are brought back to an available display.
 
 | Hotkey (two keys together) | Action |
 |---|---|
+| ⌥A (Option + A) | answer a spoken question using selected context files, without a screenshot |
 | ⌥Q (Option + Q) | reveal the latest continuously prepared audio-only hint |
 | ⌥X (Option + X) | detailed text/code answer from recent audio + selected screenshot |
 | ⌥Z (Option + Z) | short hint from a fresh screenshot + compressed recent audio, separate REST request |
 
-These are the three global shortcuts. Use **Только экран** to send a screenshot
+These are the four global shortcuts. Use **Только экран** to send a screenshot
 without audio, **Очистить** to cancel and clear, and **↑ / ↓** or the mouse/trackpad
 to scroll. The shortcuts work while another app is focused.
 **Только звук** uses the current audio input. It does not automatically mix
@@ -75,6 +76,22 @@ microphone and system audio. There is exactly **one warm audio-only Live session
 No image is ever sent to it. ⌥Z and ⌥X make independent REST requests with a fresh
 screenshot and the recent audio buffer; they do not reset or contaminate the voice
 context. ⌥Z requests a short hint; ⌥X requests the complete explanation/code.
+
+### Вопрос голосом по файлам
+
+1. Нажмите **Файлы… → Добавить…** и выберите материалы.
+2. Задайте вопрос вслух сами или попросите человека рядом. Нужна слышимость через выбранный аудиовход; распознавания конкретного говорящего нет.
+3. После вопроса нажмите **⌥A** или **Вопрос по файлам**. Ответ появится со ссылками на страницы PDF или строки документа и списком источников F1/F2.
+
+Вопрос берётся из последних секунд аудиобуфера, выбранных в настройках. Для длинных вопросов поставьте 30–60 секунд. Звук фиксируется при нажатии, поэтому чтение документов не вытесняет вопрос из буфера. Микрофон и звук динамиков автоматически не смешиваются.
+
+Поддерживаются текстовые PDF, DOCX и текстовые файлы (TXT, Markdown, CSV, JSON, исходный код и другие форматы, перечисленные в `file_context.py`). DOCX: текст основной части и таблиц; без колонтитулов и сносок. PDF со страницами без извлекаемого текста требует OCR; приложение укажет такие страницы. Изображения документов не анализируются.
+
+Лимиты: до 20 файлов, до 300 000 символов совокупного JSON-контекста; текстовый файл до 2 МБ, PDF/DOCX до 20 МБ, PDF до 1000 страниц. При превышении лимита, удалении или невозможности прочитать файл показывается ошибка; материалы не обрезаются молча. Для большого архива выберите нужные документы: отдельного поискового индекса пока нет.
+
+Список путей сохраняется между запусками. Извлечённый текст кешируется в памяти и перечитывается после изменения файла. Полный текст выбранных материалов и аудиовопрос отправляются Gemini только при **⌥A**, отдельным запросом без скриншота. Удаление из списка не удаляет оригинал. Другие режимы не используют эти файлы.
+
+Этот режим использует `gemini-3.5-flash-lite` с low thinking, с резервом `gemini-3.8-flash`. Тайм-аут до первых слов допускает переход на резерв; после начала ответа повторной отправки нет. Для обработки документов тайм-аут отдельного запроса увеличен с 20 до 60 секунд. Скорость зависит от объёма материалов и API; это не обещание ответа за секунду. При отсутствии ответа в документах модель получает указание сказать об этом явно; ссылки помогают проверить результат.
 
 Continuous audio starts with the app: **audio is sent to Gemini while people speak**.
 Screenshots are now captured and sent **only on explicit screen requests** (⌥Z,

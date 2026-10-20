@@ -13,6 +13,7 @@ MAX_AUDIO_SECONDS = 60
 class Preferences:
     def __init__(self, path=DEFAULT_PATH):
         self.path = Path(path)
+        self.context_files = []
         self.audio_seconds = 30
         self.capture_display = None
         self.overlay_display = None
@@ -28,6 +29,9 @@ class Preferences:
             data = {}
         if not isinstance(data, dict):
             data = {}
+        files = data.get("context_files", [])
+        if isinstance(files, list) and len(files) <= 20 and all(isinstance(path, str) and path for path in files):
+            self.context_files = files
         seconds = data.get("audio_seconds", 30)
         if type(seconds) is int and 1 <= seconds <= MAX_AUDIO_SECONDS:
             self.audio_seconds = seconds
@@ -49,7 +53,7 @@ class Preferences:
 
     def save(self):
         data = {name: getattr(self, name) for name in (
-            "audio_seconds", "capture_display", "overlay_display", "controls_display",
+            "context_files", "audio_seconds", "capture_display", "overlay_display", "controls_display",
             "overlay_origin", "controls_origin",
         )}
         self.path.parent.mkdir(parents=True, exist_ok=True)

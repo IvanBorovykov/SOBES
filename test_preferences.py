@@ -21,6 +21,7 @@ class PreferencesTests(unittest.TestCase):
     def test_default_and_saved_preferences_round_trip(self):
         preferences = Preferences(self.path)
         self.assertEqual(preferences.audio_seconds, 30)
+        preferences.context_files = ["/tmp/guide.md"]
         preferences.audio_seconds = 45
         preferences.capture_display = "monitor-a"
         preferences.overlay_display = "monitor-b"
@@ -28,6 +29,7 @@ class PreferencesTests(unittest.TestCase):
         preferences.overlay_origin = [-100, 1200]
         preferences.save()
         restored = Preferences(self.path)
+        self.assertEqual(restored.context_files, ["/tmp/guide.md"])
         self.assertEqual(restored.audio_seconds, 45)
         self.assertEqual(restored.capture_display, "monitor-a")
         self.assertEqual(restored.overlay_display, "monitor-b")
