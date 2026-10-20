@@ -79,6 +79,21 @@ class SystemAudioTests(unittest.TestCase):
         reader._on_ready.assert_called_once()
         self.assertNotIn('READY', errors)
 
+    def test_temporarily_missing_display_waits_and_recovers_on_ready(self):
+        ring = self.make_ring()
+        reader = SimpleNamespace(_stopped=False, _process=SimpleNamespace(
+            stderr=io.BytesIO(b'WAITING_DISPLAY\nREADY\n'), wait=lambda: 0),
+            _on_error=ring._source_error, _on_ready=ring._source_ready)
+        def mark_ready():
+            self.assertIn('Ожидаю доступный дисплей', ring.error)
+            ring._source_ready()
+            self.assertEqual(ring.error, '')
+            reader._stopped = True
+        reader._on_ready = mark_ready
+        SystemAudio._read_errors(reader)
+        self.assertFalse(ring._chunks)
+        self.assertEqual(ring.error, '')
+
     def test_startup_work_does_not_block_constructor(self):
         entered, release = threading.Event(), threading.Event()
         def startup(instance):

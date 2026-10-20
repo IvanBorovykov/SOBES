@@ -37,10 +37,23 @@ final class AudioOutput: NSObject, SCStreamOutput, SCStreamDelegate {
 
 let output = AudioOutput()
 var capture: SCStream?
+
+func availableDisplay() async throws -> SCDisplay {
+    var waiting = false
+    while true {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        if let display = content.displays.first { return display }
+        if !waiting {
+            FileHandle.standardError.write(Data("WAITING_DISPLAY\n".utf8))
+            waiting = true
+        }
+        try await Task.sleep(for: .seconds(2))
+    }
+}
+
 Task { @MainActor in
     do {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else { fail("Нет доступного дисплея для захвата звука") }
+        let display = try await availableDisplay()
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         let config = SCStreamConfiguration()
         config.capturesAudio = true

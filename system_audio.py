@@ -78,6 +78,8 @@ class SystemAudio:
                 text = line.decode('utf-8', errors='replace').strip()
                 if text == 'READY':
                     self._on_ready()
+                elif text == 'WAITING_DISPLAY':
+                    self._on_error('Ожидаю доступный дисплей macOS. Разблокируйте Mac или включите дисплей; захват звука возобновится автоматически.')
                 else:
                     reported = True
                     self._on_error(text)
