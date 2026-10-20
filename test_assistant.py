@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 import assistant
 from api_keys import ApiKey, KeyPool
 from test_api_keys import MemoryStore
+from realtime_hints import Hint
 
 
 class AssistantTests(unittest.TestCase):
@@ -139,6 +140,39 @@ class AssistantTests(unittest.TestCase):
         self.generate.assert_called_once()
         self.assertIn("Часткова відповідь", self.shown()[-1])
         self.assertIn("503", self.shown()[-1])
+
+    def test_realtime_cached_hint_skips_capture_and_buffer_upload(self):
+        realtime = self.app._realtime = Mock(enabled=True)
+        realtime.stream.return_value = iter([Hint(text="Prepared answer", first_text_at=time.monotonic()-1,
+                                                  updated_at=time.monotonic(), complete=True)])
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.capture.assert_not_called()
+        self.audio.pcm_bytes.assert_not_called()
+        self.app._live.stream.assert_not_called()
+        self.assertIn("Prepared answer", self.shown()[-1])
+        self.assertIn("готово до натискання", self.shown()[-1])
+        self.assertTrue(realtime.stream.call_args.args[0])
+
+    def test_realtime_partial_failure_does_not_replay_audio(self):
+        def stream(*args):
+            yield Hint(text="Partial", first_text_at=time.monotonic())
+            raise ConnectionError("interrupted")
+        self.app._realtime = Mock(enabled=True)
+        self.app._realtime.stream.side_effect = stream
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.capture.assert_not_called()
+        self.audio.pcm_bytes.assert_not_called()
+        self.app._live.stream.assert_not_called()
+        self.assertIn("Partial", self.shown()[-1])
+
+    def test_realtime_failure_uses_audio_only_on_demand_fallback(self):
+        self.app._realtime = Mock(enabled=True)
+        self.app._realtime.stream.side_effect = ConnectionError("not ready")
+        self.app._live.stream.return_value = iter(["Fallback"])
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.capture.assert_not_called()
+        self.assertIsNone(self.app._live.stream.call_args.args[0])
+        self.assertIn("Fallback", self.shown()[-1])
 
     def test_audio_only_live_never_captures_screen(self):
         self.capture.side_effect = AssertionError("Screen must not be captured")

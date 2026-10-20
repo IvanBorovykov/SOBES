@@ -22,13 +22,18 @@ class LiveConnection:
         self._on_key_error = on_key_error
         self._config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
+            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
             output_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction=instruction,
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(disabled=True),
             ),
         )
-        # The default 3.8 Live model does not accept thinking_level in setup.
+        if "3.1" in model:
+            self._config.thinking_config = types.ThinkingConfig(thinking_level="minimal")
+        elif "2.5" in model:
+            self._config.thinking_config = types.ThinkingConfig(thinking_budget=0)
+        # Gemini 3.8 Live does not accept thinking_level in setup.
         self._loop = asyncio.new_event_loop()
         self._connect_lock = asyncio.Lock()
         self._turn_lock = asyncio.Lock()

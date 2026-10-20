@@ -26,6 +26,20 @@ class CaptureSelectionTests(unittest.TestCase):
             result = assistant.capture_screenshot(3)
         self.assertTrue(result.startswith(b"\xff\xd8"))
 
+    def test_fast_capture_returns_a_small_jpeg(self):
+        bounds = NSMakeRect(0, 0, 3840, 2160)
+
+        def capture(args, **kwargs):
+            Image.effect_noise((3840, 2160), 80).convert("RGB").save(args[-1])
+
+        with patch.object(assistant.Quartz, "CGDisplayIsActive", return_value=True), \
+                patch.object(assistant.Quartz, "CGDisplayBounds", return_value=bounds), \
+                patch.object(assistant.mss, "mss", side_effect=OSError("Use fallback")), \
+                patch.object(assistant.subprocess, "run", side_effect=capture):
+            result = assistant.capture_screenshot(3, fast=True)
+        self.assertTrue(result.startswith(b"\xff\xd8"))
+        self.assertLessEqual(len(result), 100_000)
+
     def test_disconnected_monitor_does_not_capture_another_screen(self):
         with patch.object(assistant.mss, "mss") as capture:
             with self.assertRaisesRegex(ValueError, "отключён"):

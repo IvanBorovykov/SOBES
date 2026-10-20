@@ -64,6 +64,7 @@ from PIL import Image
 from PyObjCTools import AppHelper
 
 from live_connection import LiveConnection
+from realtime_hints import RealtimeHints
 from api_keys import KeychainError, KeychainStore, KeyPool, credential_error
 from api_keys_ui import ApiKeysPanel
 from preferences import MAX_AUDIO_SECONDS, Preferences
@@ -73,7 +74,7 @@ from preferences import MAX_AUDIO_SECONDS, Preferences
 SAMPLE_RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # 16-bit PCM
-CHUNK_FRAMES = 1024
+CHUNK_FRAMES = 320
 BUFFER_SECONDS = int(os.environ.get("AUDIO_BUFFER_SECONDS", "30"))
 if not 1 <= BUFFER_SECONDS <= MAX_AUDIO_SECONDS:
     raise ValueError("AUDIO_BUFFER_SECONDS must be between 1 and 60")
@@ -83,7 +84,7 @@ JPEG_QUALITY = 70
 
 PRIMARY_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash")
-LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.8-live")
+LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE")  # substring of an input device name, e.g. "BlackHole"
 MONITOR_INDEX = int(os.environ.get("MONITOR", "1"))  # mss index: 1 = primary display
 
@@ -124,6 +125,7 @@ class AudioRing:
         self._chunks = deque(maxlen=-(-MAX_AUDIO_SECONDS * SAMPLE_RATE // CHUNK_FRAMES))
         self._seconds = BUFFER_SECONDS
         self._lock = threading.Lock()
+        self._listeners = []
         self._pa = pyaudio.PyAudio()
         self._stream = self._pa.open(
             format=pyaudio.paInt16,
@@ -150,7 +152,18 @@ class AudioRing:
     def _on_audio(self, data, frame_count, time_info, status):
         with self._lock:
             self._chunks.append(data)
+            listeners = tuple(self._listeners)
+        for listener in listeners:
+            listener(data)
         return None, pyaudio.paContinue
+
+    def subscribe(self, listener):
+        with self._lock:
+            self._listeners.append(listener)
+
+    def unsubscribe(self, listener):
+        with self._lock:
+            self._listeners.remove(listener)
 
     def pcm_bytes(self):
         with self._lock:
@@ -199,7 +212,7 @@ def get_displays():
     return displays
 
 
-def capture_screenshot(display_id=None):
+def capture_screenshot(display_id=None, fast=False):
     if display_id is None:
         display_id = Quartz.CGMainDisplayID()
     if display_id < 0 or not Quartz.CGDisplayIsActive(display_id):
@@ -216,17 +229,28 @@ def capture_screenshot(display_id=None):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "screen.png")
             rectangle = ",".join(str(region[key]) for key in ("left", "top", "width", "height"))
-            subprocess.run(["screencapture", "-x", f"-R{rectangle}", path], check=True)
+            subprocess.run(["screencapture", "-x", f"-R{rectangle}", path], check=True,
+                           timeout=3 if fast else 15)
             img = Image.open(path).convert("RGB")
 
-    if img.width > MAX_SCREENSHOT_WIDTH:
+    if fast:
+        factor = max(1, img.width // MAX_SCREENSHOT_WIDTH)
+        if factor > 1:
+            img = img.reduce(factor)
+        img.thumbnail((MAX_SCREENSHOT_WIDTH, MAX_SCREENSHOT_WIDTH), Image.Resampling.BILINEAR)
+    elif img.width > MAX_SCREENSHOT_WIDTH:
         img = img.resize(
             (MAX_SCREENSHOT_WIDTH, round(img.height * MAX_SCREENSHOT_WIDTH / img.width)),
-            Image.LANCZOS,
+            Image.Resampling.LANCZOS,
         )
-    out = io.BytesIO()
-    img.save(out, "JPEG", quality=JPEG_QUALITY, optimize=True)
-    return out.getvalue()
+    while True:
+        out = io.BytesIO()
+        img.save(out, "JPEG", quality=60 if fast else JPEG_QUALITY, optimize=not fast)
+        result = out.getvalue()
+        if not fast or len(result) <= 100_000 or img.width <= 320:
+            return result
+        img = img.resize((max(1, img.width * 4 // 5), max(1, img.height * 4 // 5)),
+                         Image.Resampling.BILINEAR)
 
 
 # --- Overlay ------------------------------------------------------------------
@@ -255,7 +279,7 @@ class Overlay:
 
     def __init__(self):
         visible = NSScreen.mainScreen().visibleFrame()
-        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 340))
+        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 360))
         frame = NSMakeRect(
             visible.origin.x + visible.size.width - OVERLAY_WIDTH - 20,
             visible.origin.y + (visible.size.height - height) / 2,
@@ -476,7 +500,7 @@ class Controls(NSObject):
             return None
         self._actions = actions
         panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(50, 50, 620, 234), NSWindowStyleMaskTitled,
+            NSMakeRect(50, 50, 620, 254), NSWindowStyleMaskTitled,
             NSBackingStoreBuffered, False,
         )
         panel.setTitle_("Помощник — перетащите окно за этот заголовок")
@@ -493,18 +517,19 @@ class Controls(NSObject):
         self._status = NSTextField.wrappingLabelWithString_("")
         self._status.setFont_(NSFont.systemFontOfSize_(11))
         self._status.setTextColor_(NSColor.secondaryLabelColor())
-        self._status.setFrame_(NSMakeRect(16, 8, 588, 92))
+        self._status.setFrame_(NSMakeRect(16, 8, 588, 112))
         content.addSubview_(self._status)
         self._buttons = []
         specs = (
-            ("Только звук  ⌥Q", "audio", 14, 188, 190),
-            ("Подсказка  ⌥Z", "live", 212, 188, 208),
-            ("Ответ / код  ⌥X", "answer", 428, 188, 178),
-            ("Только экран", "screen", 14, 148, 190),
-            ("Очистить", "clear", 212, 148, 208),
-            ("Настройки…", "settings", 428, 148, 178),
-            ("↑", "up", 428, 108, 85),
-            ("↓", "down", 521, 108, 85),
+            ("Только звук  ⌥Q", "audio", 14, 208, 190),
+            ("Подсказка  ⌥Z", "live", 212, 208, 208),
+            ("Ответ / код  ⌥X", "answer", 428, 208, 178),
+            ("Только экран", "screen", 14, 168, 190),
+            ("Очистить", "clear", 212, 168, 208),
+            ("Настройки…", "settings", 428, 168, 178),
+            ("Поток: пауза / пуск", "streaming", 14, 128, 406),
+            ("↑", "up", 428, 128, 85),
+            ("↓", "down", 521, 128, 85),
         )
         self._names = [spec[1] for spec in specs]
         for index, (title, name, x, y, width) in enumerate(specs):
@@ -573,7 +598,7 @@ class Controls(NSObject):
                 setattr(self._preferences, f"{kind}_display", display["key"])
                 visible = display["screen"].visibleFrame()
                 if kind == "overlay":
-                    height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 340))
+                    height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 360))
                     panel.setContentSize_(NSMakeSize(OVERLAY_WIDTH, height))
                 size = panel.frame().size
                 origin = getattr(self._preferences, f"{kind}_origin")
@@ -590,6 +615,9 @@ class Controls(NSObject):
         capture = by_key.get(self._preferences.capture_display)
         self._assistant.capture_display_id = capture["id"] if capture else -1
         self._audio.set_seconds(self._preferences.audio_seconds)
+        realtime = getattr(self._assistant, "_realtime", None)
+        if realtime:
+            realtime.set_display(self._assistant.capture_display_id)
         self.update_status()
 
     @objc.python_method
@@ -600,8 +628,12 @@ class Controls(NSObject):
                             ("controls_display", "Панель кнопок")):
             display = displays.get(getattr(self._preferences, name))
             lines.append(f"{title}: {display['title'] if display else 'экран отключён — откройте настройки'}")
-        lines.append(f"Аудио: последние {self._preferences.audio_seconds} с · {self._audio.device_name}")
+        lines.append(f"Аудио: {self._audio.device_name} · буфер для ответа / резерва {self._preferences.audio_seconds} с")
         lines.append(self._assistant.keys.status())
+        realtime = getattr(self._assistant, "_realtime", None)
+        lines.append(realtime.status() if realtime else "Поток: запуск…")
+        self._buttons[self._names.index("streaming")].setTitle_(
+            "Пауза потока" if realtime and realtime.enabled else "Включить поток")
         self._status.setStringValue_("\n".join(lines))
         self._status.setToolTip_("\n".join(lines))
 
@@ -687,12 +719,28 @@ class Assistant:
         self._live = LiveConnection(client, LIVE_MODEL, LIVE_INSTRUCTION,
                                     redact=keys.redact, on_key_error=keys.failed_client)
         self.capture_display_id = Quartz.CGMainDisplayID()
+        self._realtime = None
         self._generation = 0  # bumped on every trigger/clear; stale streams stop rendering
+
+    def start_realtime(self, on_status=None):
+        self._live.reset(None)  # Keep the on-demand fallback disconnected until needed.
+        self._realtime = RealtimeHints(
+            self.keys, LIVE_MODEL, LIVE_INSTRUCTION,
+            lambda display_id: capture_screenshot(display_id, fast=True),
+            self.capture_display_id, on_status,
+        )
+        self._audio.subscribe(self._realtime.offer_audio)
+
+    def toggle_realtime(self):
+        if self._realtime:
+            self._generation += 1
+            self._realtime.set_enabled(not self._realtime.enabled)
 
     def analyze(self, screen_only=False, live=False, audio_only=False):
         self._generation += 1
         started = time.perf_counter()
-        preparing = "Готую аудіо без екрана" if audio_only else "Готую знімок екрана"
+        preparing = "Відкриваю потокову підказку" if live and self._realtime and self._realtime.enabled else (
+            "Готую аудіо без екрана" if audio_only else "Готую знімок екрана")
         self._overlay.show_text(f"⏳ {preparing}…  ·  «Очистить» — скасувати", reset_scroll=True)
         threading.Thread(
             target=self._run_live if live else self._run,
@@ -704,11 +752,16 @@ class Assistant:
         self._generation += 1
         self._audio.clear()
         self._overlay.hide()
+        if self._realtime:
+            self._realtime.reset()
         candidates = self.keys.candidates(LIVE_MODEL)
-        self._live.reset(self.keys.client(candidates[0]) if candidates else None)
+        self._live.reset(None if self._realtime else self.keys.client(candidates[0]) if candidates else None)
 
     def close(self):
         self._generation += 1
+        if self._realtime:
+            self._audio.unsubscribe(self._realtime.offer_audio)
+            self._realtime.close()
         self._live.close()
         self._capture_pool.shutdown(wait=False, cancel_futures=True)
         self.keys.close()
@@ -716,7 +769,9 @@ class Assistant:
     def credentials_changed(self):
         self._generation += 1
         candidates = self.keys.candidates(LIVE_MODEL)
-        self._live.set_client(self.keys.client(candidates[0]) if candidates else None)
+        if self._realtime:
+            self._realtime.reset()
+        self._live.set_client(None if self._realtime else self.keys.client(candidates[0]) if candidates else None)
 
     def _show(self, generation, text):
         AppHelper.callAfter(self._show_if_current, generation, text)
@@ -818,7 +873,40 @@ class Assistant:
                     return
         self._show(generation, self.keys.unavailable_message())
 
+    def _run_realtime(self, generation, started, audio_only):
+        text = ""
+        mode = "тільки аудіо" if audio_only else "екран + аудіо"
+        first_display = None
+        request_monotonic = time.monotonic() - (time.perf_counter() - started)
+        try:
+            for hint in self._realtime.stream(audio_only, lambda: generation != self._generation):
+                if generation != self._generation:
+                    return True
+                if first_display is None:
+                    first_display = time.perf_counter() - started
+                    cached = hint.first_text_at < request_monotonic
+                    timing = f"готово до натискання · показ {first_display:.2f} с" if cached else (
+                        f"перший текст після натискання {first_display:.2f} с")
+                    print(f"[realtime] display={first_display:.3f}s cached={cached}")
+                    if hint.vad_end_at and hint.first_text_at >= hint.vad_end_at:
+                        print(f"[realtime] server_vad_end_to_text={hint.first_text_at-hint.vad_end_at:.3f}s")
+                text = hint.text
+                footer = "\n\n✓ Готово" if hint.complete else ""
+                self._show(generation, f"Live · {self._realtime.model} · {mode}\n{timing}\n\n{text}{footer}")
+            return generation != self._generation or bool(text)
+        except Exception as error:
+            if generation != self._generation:
+                return True
+            if text:
+                self._show(generation, f"Live · {mode}\n\n{text}\n\n⚠️ {error}")
+                return True
+            print(f"[realtime] using on-demand fallback: {self.keys.redact(error)}")
+            return False
+
     def _run_live(self, generation, started, screen_only=False, capture_display_id=None, audio_only=False):
+        if self._realtime and self._realtime.enabled:
+            if self._run_realtime(generation, started, audio_only):
+                return
         text = ""
         jpeg = pcm = None
         header = f"Live · {'тільки аудіо' if audio_only else 'екран + аудіо'} · {LIVE_MODEL}\n\n"
@@ -941,6 +1029,7 @@ def main():
     audio = AudioRing()
     assistant = Assistant(overlay, audio, keys)
     controls = Controls.alloc().initWithActions_({
+        "streaming": assistant.toggle_realtime,
         "audio": lambda: assistant.analyze(live=True, audio_only=True),
         "live": lambda: assistant.analyze(live=True),
         "answer": assistant.analyze,
@@ -950,6 +1039,7 @@ def main():
         "down": lambda: overlay.scroll(SCROLL_STEP),
     })
     controls.configure(preferences, overlay, audio, assistant)
+    assistant.start_realtime(lambda: AppHelper.callAfter(controls.update_status))
     hotkeys = Hotkeys({  # noqa: F841 — must stay referenced while the run loop runs
         KEY_X: (assistant.analyze, False),
         KEY_Z: (lambda: assistant.analyze(live=True), False),
@@ -959,7 +1049,7 @@ def main():
     print(f"Recording (last {preferences.audio_seconds}s sent). Models: {PRIMARY_MODEL} → {FALLBACK_MODEL}")
     print("⌥Q audio only · ⌥Z Live hint · ⌥X text/code · Ctrl+C quit")
     controls.show()
-    overlay.show_text("Готов к работе.\n\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nОстальные действия — кнопками в окне.\n\n"
+    overlay.show_text("Готов к работе.\n\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nАудіо та екран передаються у Gemini в фоні.\nКнопка «Поток: пауза / пуск» зупиняє фонову передачу.\n\n"
                       "Окно можно перемещать за стандартный заголовок сверху.\n"
                       "Мониторы и длительность аудио выбираются в настройках.", reset_scroll=True)
     if not keys.entries():
