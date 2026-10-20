@@ -236,7 +236,7 @@ class AssistantTests(unittest.TestCase):
                                                   updated_at=time.monotonic(), complete=True)])
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
-        self.audio.pcm_bytes.assert_not_called()
+        self.audio.pcm_bytes.assert_called_once()
         self.generate.assert_not_called()
         self.assertIn("Prepared answer", self.shown()[-1])
         self.assertIn("готово до натискання", self.shown()[-1])
@@ -250,7 +250,7 @@ class AssistantTests(unittest.TestCase):
         self.app._realtime.stream.side_effect = stream
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.capture.assert_not_called()
-        self.audio.pcm_bytes.assert_not_called()
+        self.audio.pcm_bytes.assert_called_once()
         self.generate.assert_not_called()
         self.assertIn("Partial", self.shown()[-1])
 
@@ -265,6 +265,51 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(contents[0].inline_data.mime_type, "audio/ogg")
         self.assertEqual(contents[0].inline_data.data, self.payload.data)
         self.assertIn("Fallback", self.shown()[-1])
+
+    def test_audio_fallback_uses_benchmarked_model_without_thinking(self):
+        self.generate.return_value = (SimpleNamespace(text="Answer") for _ in range(1))
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        request = self.generate.call_args.kwargs
+        self.assertEqual(request["model"], "gemini-2.5-flash")
+        self.assertEqual(request["config"].thinking_config.thinking_budget, 0)
+        self.assertEqual(request["config"].http_options.timeout, 10_000)
+
+    def test_audio_fallback_keeps_question_captured_before_waiting_for_live(self):
+        self.audio.pcm_bytes.return_value = b"original question"
+        self.app._realtime = Mock(enabled=True)
+        def delayed_failure(cancelled):
+            self.audio.pcm_bytes.return_value = b"later speech"
+            raise TimeoutError("Live delayed")
+        self.app._realtime.stream.side_effect = delayed_failure
+        self.generate.return_value = (SimpleNamespace(text="Answer") for _ in range(1))
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.audio.request_audio.assert_called_once_with(b"original question")
+
+    def test_audio_timeout_before_text_uses_fast_reserve(self):
+        from httpx import ReadTimeout
+        self.generate.side_effect = [ReadTimeout("slow model"),
+                                     (SimpleNamespace(text="Reserve answer") for _ in range(1))]
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.assertEqual([call.kwargs["model"] for call in self.generate.call_args_list],
+                         ["gemini-2.5-flash", "gemini-3-flash-preview"])
+        self.assertEqual(self.generate.call_args.kwargs["config"].thinking_config.thinking_level, "MINIMAL")
+        self.assertIn("✓ Завершено", self.shown()[-1])
+
+    def test_audio_timeout_after_text_preserves_partial_without_replay(self):
+        from httpx import ReadTimeout
+        def stream():
+            yield SimpleNamespace(text="Partial voice answer")
+            raise ReadTimeout("slow tail")
+        self.generate.return_value = stream()
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.generate.assert_called_once()
+        self.assertIn("Partial voice answer", self.shown()[-1])
+
+    def test_capture_failure_during_voice_request_is_visible(self):
+        self.audio.pcm_bytes.side_effect = ValueError("Capture stopped")
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.generate.assert_not_called()
+        self.assertIn("Capture stopped", self.shown()[-1])
 
     def test_audio_only_without_realtime_never_captures_screen(self):
         self.capture.side_effect = AssertionError("Screen must not be captured")

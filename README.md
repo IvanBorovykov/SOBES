@@ -1,6 +1,7 @@
 # Interview assistant
 
-Текущая версия: **v0.4.1 — прямой звук звонка для голосовых подсказок**.
+Текущая версия: **v0.4.2 — проверенные модели для «Только звук»**.
+Полный сравнительный тест: [45 API-идентификаторов из каталога 63 моделей](benchmarks/REPORT.md).
 Замеры и ограничения: [LATENCY.md](LATENCY.md).
 
 **v0.1.0 — первая рабочая версия.** В пользовательском тесте первый текст
@@ -131,7 +132,7 @@ time from keypress to first text. See [LATENCY.md](LATENCY.md) for measurements.
 Grant your terminal app **Microphone**, **Screen Recording** and **Accessibility** in
 System Settings → Privacy & Security, then restart the terminal.
 
-Optional env vars: `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_LIVE_MODEL`,
+Optional env vars: `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_AUDIO_MODEL`, `GEMINI_AUDIO_FALLBACK_MODEL`,
 `AUDIO_BUFFER_SECONDS` (1–60, default 30), `AUDIO_DEVICE` (input device name substring),
 `MONITOR` (display number shown in settings, default 1). Explicit audio/monitor
 environment variables override the corresponding saved choice on startup. Use the
@@ -146,6 +147,8 @@ Up to 60 seconds are kept locally in RAM. The selected recent duration applies
 to ⌥Z, ⌥X and on-demand fallback; continuous Live hints receive audio as it arrives
 instead of replaying that buffer. Increasing the duration can use audio already
 retained since launch.
+
+Для **⌥Q** проверена отдельная резервная цепочка: `gemini-2.5-flash` с thinking budget 0 → `gemini-3-flash-preview` с minimal thinking. Аудио сохраняется перед ожиданием Live, чтобы не потерять начало вопроса. Тайм-аут отдельного голосового REST-вызова — 10 с; до появления текста можно перейти на резерв, после первых слов повторной отправки нет. Общее ожидание может включать Live и несколько попыток. Экранные режимы и вопросы по файлам используют прежние модели. Сравнение и ограничения: [benchmarks/REPORT.md](benchmarks/REPORT.md).
 
 Fast hints default to `gemini-3.1-flash-live-preview` with
 `thinking_level="minimal"`, based on the local synthetic latency probes in

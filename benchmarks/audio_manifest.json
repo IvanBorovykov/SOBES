@@ -1,0 +1,29 @@
+{
+  "python": {
+    "text": "Чем отличается список от кортежа в Питоне? Ответь коротко.",
+    "voice": "macOS Milena",
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width": 2,
+    "seconds": 3.8735625,
+    "sha256": "484553c9dbbfb11bd2458802fc8b47ec9aa2c22e996a6a06d96fc1ab6503bd67"
+  },
+  "last_question": {
+    "text": "Сначала хотел спросить про HTTP. Нет, другой вопрос. Сколько будет семнадцать плюс двадцать пять? Ответь коротко.",
+    "voice": "macOS Milena",
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width": 2,
+    "seconds": 8.4121875,
+    "sha256": "33648c26e6fa2eeabf6d36af38e24bd45d6dae2c412c7bc26de41eeb47a64c7d"
+  },
+  "cache": {
+    "text": "Что такое кэш и зачем он нужен? Объясни коротко.",
+    "voice": "macOS Milena",
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width": 2,
+    "seconds": 3.3163125,
+    "sha256": "76020c1b1bb0ee7803de8c43e50d5f0894b5fa47552692458aed87ad67faf401"
+  }
+}
