@@ -71,7 +71,7 @@ def error_code(error):
 
 def credential_error(error):
     code = error_code(error)
-    return code in (401, 403, 429) or (code == 400 and "API_KEY_INVALID" in str(error_payload(error)))
+    return code in (401, 403, 404, 429) or (code == 400 and "API_KEY_INVALID" in str(error_payload(error)))
 
 
 def error_payload(error):
@@ -204,7 +204,7 @@ class KeyPool:
                 for other in self._entries:
                     if other.id == entry.id or (entry.project and other.project == entry.project):
                         self._cooldown[(other.id, model)] = deadline
-            elif error_code(error) == 403:
+            elif error_code(error) in (403, 404):
                 self._denied.add((entry.id, model))
             elif credential_error(error):
                 self._invalid.add(entry.id)

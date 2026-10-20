@@ -1,0 +1,492 @@
+{
+  "models.py": {
+    "lines": 160,
+    "sha256": "427762b0eaf51cc403bd95977f0787e013a179f67f75c104a787e10f5a91ff7b",
+    "symbols": {
+      "Product": {
+        "line": 6,
+        "end": 17
+      },
+      "Customer": {
+        "line": 21,
+        "end": 29
+      },
+      "OrderLine": {
+        "line": 33,
+        "end": 39
+      },
+      "Order": {
+        "line": 43,
+        "end": 65
+      },
+      "Receipt": {
+        "line": 69,
+        "end": 79
+      },
+      "merge_lines": {
+        "line": 82,
+        "end": 86
+      },
+      "is_paid": {
+        "line": 89,
+        "end": 90
+      },
+      "validate_sku": {
+        "line": 93,
+        "end": 97
+      },
+      "validate_customer_id": {
+        "line": 100,
+        "end": 104
+      },
+      "validate_order_id": {
+        "line": 107,
+        "end": 111
+      },
+      "validate_category": {
+        "line": 114,
+        "end": 118
+      },
+      "validate_email": {
+        "line": 121,
+        "end": 125
+      },
+      "validate_name": {
+        "line": 128,
+        "end": 132
+      },
+      "validate_status": {
+        "line": 135,
+        "end": 139
+      },
+      "validate_label": {
+        "line": 142,
+        "end": 146
+      },
+      "validate_external_reference": {
+        "line": 149,
+        "end": 153
+      },
+      "validate_display_title": {
+        "line": 156,
+        "end": 160
+      },
+      "__post_init__": {
+        "line": 37,
+        "end": 39
+      },
+      "label": {
+        "line": 16,
+        "end": 17
+      },
+      "add": {
+        "line": 50,
+        "end": 53
+      },
+      "quantities": {
+        "line": 55,
+        "end": 59
+      },
+      "mark_paid": {
+        "line": 61,
+        "end": 65
+      },
+      "as_dict": {
+        "line": 76,
+        "end": 79
+      }
+    }
+  },
+  "pricing.py": {
+    "lines": 149,
+    "sha256": "fed871ebc23749f3584abc81de27db8964af17beea7541072b75ee65dae425d5",
+    "symbols": {
+      "subtotal_for": {
+        "line": 9,
+        "end": 14
+      },
+      "coupon_percent": {
+        "line": 17,
+        "end": 23
+      },
+      "discount_percent": {
+        "line": 26,
+        "end": 28
+      },
+      "shipping_for": {
+        "line": 31,
+        "end": 34
+      },
+      "BBB": {
+        "line": 37,
+        "end": 44
+      },
+      "explain_discount": {
+        "line": 47,
+        "end": 49
+      },
+      "price_after_discount": {
+        "line": 52,
+        "end": 55
+      },
+      "format_money": {
+        "line": 58,
+        "end": 61
+      },
+      "quote_quantity": {
+        "line": 64,
+        "end": 67
+      },
+      "compare_prices": {
+        "line": 70,
+        "end": 71
+      },
+      "eligible_coupons": {
+        "line": 74,
+        "end": 75
+      },
+      "receipt_summary": {
+        "line": 78,
+        "end": 79
+      },
+      "validate_coupon": {
+        "line": 82,
+        "end": 86
+      },
+      "validate_currency": {
+        "line": 89,
+        "end": 93
+      },
+      "validate_price_label": {
+        "line": 96,
+        "end": 100
+      },
+      "validate_discount_label": {
+        "line": 103,
+        "end": 107
+      },
+      "validate_receipt_id": {
+        "line": 110,
+        "end": 114
+      },
+      "validate_tax_code": {
+        "line": 117,
+        "end": 121
+      },
+      "validate_region": {
+        "line": 124,
+        "end": 128
+      },
+      "validate_shipping_zone": {
+        "line": 131,
+        "end": 135
+      },
+      "validate_external_reference": {
+        "line": 138,
+        "end": 142
+      },
+      "validate_display_title": {
+        "line": 145,
+        "end": 149
+      }
+    }
+  },
+  "storage.py": {
+    "lines": 148,
+    "sha256": "b29f9c961a60db99385274b6d60f9b89049c7fbc07a5a02912a3b48c3556e91f",
+    "symbols": {
+      "Repository": {
+        "line": 5,
+        "end": 69
+      },
+      "exported_stock": {
+        "line": 72,
+        "end": 73
+      },
+      "inventory_value": {
+        "line": 76,
+        "end": 78
+      },
+      "validate_product_key": {
+        "line": 81,
+        "end": 85
+      },
+      "validate_customer_key": {
+        "line": 88,
+        "end": 92
+      },
+      "validate_order_key": {
+        "line": 95,
+        "end": 99
+      },
+      "validate_snapshot_name": {
+        "line": 102,
+        "end": 106
+      },
+      "validate_audit_label": {
+        "line": 109,
+        "end": 113
+      },
+      "validate_stock_key": {
+        "line": 116,
+        "end": 120
+      },
+      "validate_export_name": {
+        "line": 123,
+        "end": 127
+      },
+      "validate_source_name": {
+        "line": 130,
+        "end": 134
+      },
+      "validate_external_reference": {
+        "line": 137,
+        "end": 141
+      },
+      "validate_display_title": {
+        "line": 144,
+        "end": 148
+      },
+      "__init__": {
+        "line": 6,
+        "end": 11
+      },
+      "add_product": {
+        "line": 13,
+        "end": 17
+      },
+      "add_customer": {
+        "line": 19,
+        "end": 22
+      },
+      "save_order": {
+        "line": 24,
+        "end": 26
+      },
+      "get_order": {
+        "line": 28,
+        "end": 29
+      },
+      "reserve": {
+        "line": 31,
+        "end": 38
+      },
+      "release": {
+        "line": 40,
+        "end": 46
+      },
+      "list_orders": {
+        "line": 48,
+        "end": 50
+      },
+      "low_stock": {
+        "line": 52,
+        "end": 54
+      },
+      "snapshot": {
+        "line": 56,
+        "end": 58
+      },
+      "restore": {
+        "line": 60,
+        "end": 65
+      },
+      "counts": {
+        "line": 67,
+        "end": 69
+      }
+    }
+  },
+  "service.py": {
+    "lines": 147,
+    "sha256": "665d21f430085a72547c3eab74917d867e32e3ec48158aed95479bbec28e59af",
+    "symbols": {
+      "CheckoutService": {
+        "line": 6,
+        "end": 69
+      },
+      "order_total": {
+        "line": 72,
+        "end": 73
+      },
+      "has_customer": {
+        "line": 76,
+        "end": 77
+      },
+      "validate_request_id": {
+        "line": 80,
+        "end": 84
+      },
+      "validate_session_id": {
+        "line": 87,
+        "end": 91
+      },
+      "validate_actor_id": {
+        "line": 94,
+        "end": 98
+      },
+      "validate_trace_id": {
+        "line": 101,
+        "end": 105
+      },
+      "validate_operation": {
+        "line": 108,
+        "end": 112
+      },
+      "validate_correlation_id": {
+        "line": 115,
+        "end": 119
+      },
+      "validate_channel": {
+        "line": 122,
+        "end": 126
+      },
+      "validate_reason": {
+        "line": 129,
+        "end": 133
+      },
+      "validate_external_reference": {
+        "line": 136,
+        "end": 140
+      },
+      "validate_display_title": {
+        "line": 143,
+        "end": 147
+      },
+      "__init__": {
+        "line": 7,
+        "end": 9
+      },
+      "create_order": {
+        "line": 11,
+        "end": 18
+      },
+      "add_item": {
+        "line": 20,
+        "end": 26
+      },
+      "checkout": {
+        "line": 28,
+        "end": 42
+      },
+      "cancel": {
+        "line": 44,
+        "end": 52
+      },
+      "quote": {
+        "line": 54,
+        "end": 57
+      },
+      "customer_orders": {
+        "line": 59,
+        "end": 61
+      },
+      "remove_item": {
+        "line": 63,
+        "end": 69
+      }
+    }
+  },
+  "reporting.py": {
+    "lines": 150,
+    "sha256": "596df7bff26c4be41ff963acc4016275fdf0e08c3b117b9546c99ccffe5bb40b",
+    "symbols": {
+      "paid_orders": {
+        "line": 6,
+        "end": 7
+      },
+      "revenue": {
+        "line": 10,
+        "end": 11
+      },
+      "average_order": {
+        "line": 14,
+        "end": 18
+      },
+      "top_products": {
+        "line": 21,
+        "end": 25
+      },
+      "customer_spending": {
+        "line": 28,
+        "end": 32
+      },
+      "stock_report": {
+        "line": 35,
+        "end": 38
+      },
+      "dashboard": {
+        "line": 41,
+        "end": 45
+      },
+      "render_dashboard": {
+        "line": 48,
+        "end": 52
+      },
+      "order_status_counts": {
+        "line": 55,
+        "end": 56
+      },
+      "total_units_sold": {
+        "line": 59,
+        "end": 60
+      },
+      "customer_summary": {
+        "line": 63,
+        "end": 66
+      },
+      "find_orders_with_product": {
+        "line": 69,
+        "end": 71
+      },
+      "has_sales": {
+        "line": 74,
+        "end": 75
+      },
+      "best_customer": {
+        "line": 78,
+        "end": 80
+      },
+      "validate_report_name": {
+        "line": 83,
+        "end": 87
+      },
+      "validate_column_name": {
+        "line": 90,
+        "end": 94
+      },
+      "validate_filter_name": {
+        "line": 97,
+        "end": 101
+      },
+      "validate_metric_name": {
+        "line": 104,
+        "end": 108
+      },
+      "validate_group_name": {
+        "line": 111,
+        "end": 115
+      },
+      "validate_period_name": {
+        "line": 118,
+        "end": 122
+      },
+      "validate_sort_name": {
+        "line": 125,
+        "end": 129
+      },
+      "validate_export_title": {
+        "line": 132,
+        "end": 136
+      },
+      "validate_external_reference": {
+        "line": 139,
+        "end": 143
+      },
+      "validate_display_title": {
+        "line": 146,
+        "end": 150
+      }
+    }
+  }
+}

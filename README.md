@@ -1,6 +1,7 @@
 # Interview assistant
 
-Текущая версия: **v0.4.3 — восстановление запуска захвата звука**.
+Текущая версия: **v0.4.4 — проверенные голосовые вопросы по нескольким файлам**.
+Файловые тесты: [5 Python-модулей, 754 строки, вопросы преподавателя и шум](benchmarks/files_project/REPORT.md).
 Полный сравнительный тест: [45 API-идентификаторов из каталога 63 моделей](benchmarks/REPORT.md).
 Замеры и ограничения: [LATENCY.md](LATENCY.md).
 
@@ -28,7 +29,7 @@ Get Gemini API keys in [Google AI Studio](https://aistudio.google.com/apikey).
 With automatic switching enabled, a quota response (429) before the first answer
 text makes the app try the next available key. It respects the server's retry delay
 and does not replay a question after text has already arrived. Invalid credentials
-are skipped; model permission failures only block that model. Clearing the answer
+are skipped; model permission/unavailability failures (403/404) only block that model for that key in the running process. A project-specific 404 tries other keys before another model; a partial answer is preserved without replay. Clearing the answer
 does not reconnect keys that are unavailable. Remaining quota is not predicted.
 
 Google applies [rate limits per project, not per API key](https://ai.google.dev/gemini-api/docs/rate-limits).
@@ -92,7 +93,7 @@ context. ⌥Z requests a short hint; ⌥X requests the complete explanation/code
 
 Список путей сохраняется между запусками. Извлечённый текст кешируется в памяти и перечитывается после изменения файла. Полный текст выбранных материалов и аудиовопрос отправляются Gemini только при **⌥A**, отдельным запросом без скриншота. Удаление из списка не удаляет оригинал. Другие режимы не используют эти файлы.
 
-Этот режим использует `gemini-3.5-flash-lite` с low thinking, с резервом `gemini-3.8-flash`. Тайм-аут до первых слов допускает переход на резерв; после начала ответа повторной отправки нет. Для обработки документов тайм-аут отдельного запроса увеличен с 20 до 60 секунд. Скорость зависит от объёма материалов и API; это не обещание ответа за секунду. При отсутствии ответа в документах модель получает указание сказать об этом явно; ссылки помогают проверить результат.
+Этот режим использует `gemini-3.5-flash-lite` с **high thinking**, с резервом `gemini-3.8-flash` low. В тесте по пяти модулям прежний low дал четыре ошибки основной логики из девяти вопросов; high с уточнённой инструкцией прошёл 9 обычных и 7 тихих/зашумлённых вопросов. Медианы до первого текста — 3,33 и 3,92 с соответственно; это не гарантия для любого проекта. Демо: `benchmarks/files_project/`, выбирайте только models.py, pricing.py, storage.py, service.py и reporting.py. Тайм-аут до первых слов допускает переход на резерв; после начала ответа повторной отправки нет. Для обработки документов тайм-аут отдельного запроса увеличен с 20 до 60 секунд. Скорость зависит от объёма материалов и API; это не обещание ответа за секунду. При отсутствии ответа в документах модель получает указание сказать об этом явно; ссылки помогают проверить результат.
 
 ### Звук звонка или видео
 
@@ -132,7 +133,7 @@ time from keypress to first text. See [LATENCY.md](LATENCY.md) for measurements.
 Grant your terminal app **Microphone**, **Screen Recording** and **Accessibility** in
 System Settings → Privacy & Security, then restart the terminal.
 
-Optional env vars: `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_AUDIO_MODEL`, `GEMINI_AUDIO_FALLBACK_MODEL`,
+Optional env vars: `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_AUDIO_MODEL`, `GEMINI_AUDIO_FALLBACK_MODEL`, `GEMINI_FILES_MODEL`, `GEMINI_FILES_FALLBACK_MODEL`,
 `AUDIO_BUFFER_SECONDS` (1–60, default 30), `AUDIO_DEVICE` (input device name substring),
 `MONITOR` (display number shown in settings, default 1). Explicit audio/monitor
 environment variables override the corresponding saved choice on startup. Use the
