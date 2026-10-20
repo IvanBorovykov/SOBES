@@ -140,6 +140,38 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("Часткова відповідь", self.shown()[-1])
         self.assertIn("503", self.shown()[-1])
 
+    def test_audio_only_live_never_captures_screen(self):
+        self.capture.side_effect = AssertionError("Screen must not be captured")
+        self.app._live.stream.return_value = iter(["Audio hint"])
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.app._live.stream.assert_called_once()
+        self.assertIsNone(self.app._live.stream.call_args.args[0])
+        self.capture.assert_not_called()
+        self.assertIn("Audio hint", self.shown()[-1])
+        self.assertIn("тільки аудіо", self.shown()[-1])
+
+    def test_audio_only_fallback_keeps_audio_snapshot_and_sends_no_image(self):
+        self.capture.side_effect = AssertionError("Screen must not be captured")
+        self.app._live.stream.side_effect = ConnectionError("offline")
+        self.generate.return_value = iter([SimpleNamespace(text="Audio fallback")])
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.capture.assert_not_called()
+        self.audio.pcm_bytes.assert_called_once()
+        self.audio.wav_bytes.assert_called_once_with(b"pcm")
+        contents = self.generate.call_args.kwargs["contents"]
+        self.assertEqual(len(contents), 2)
+        self.assertEqual(contents[0].inline_data.mime_type, "audio/wav")
+        self.assertIn("Екран не додано", contents[1])
+        self.assertIn("Audio fallback", self.shown()[-1])
+
+    def test_empty_audio_only_buffer_does_not_contact_model_or_capture_screen(self):
+        self.audio.pcm_bytes.return_value = b""
+        self.audio.wav_bytes.return_value = None
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.generate.assert_not_called()
+        self.app._live.stream.assert_not_called()
+        self.capture.assert_not_called()
+
     def test_live_hint_shows_transcript_and_link_to_code_hotkey(self):
         self.app._live.stream.return_value = (part for part in ["Коротка", " підказка"])
         self.app._run_live(0, time.perf_counter())

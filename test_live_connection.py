@@ -77,6 +77,21 @@ class LiveConnectionTests(unittest.TestCase):
         self.assertIsNone(config.thinking_config)
         self.assertIsNotNone(config.output_audio_transcription)
 
+    def test_audio_only_sends_no_video_and_reuses_session(self):
+        self.response_stream.side_effect = [responses(message("One", True)), responses(message("Two", True))]
+        self.assertEqual(list(self.connection.stream(None, b"pcm", lambda: False)), ["One"])
+        self.assertEqual(list(self.connection.stream(None, b"pcm2", lambda: False)), ["Two"])
+        self.assertFalse(any("video" in call.kwargs for call in self.session.send_realtime_input.call_args_list))
+        self.client.aio.live.connect.assert_called_once()
+
+    def test_audio_only_starts_fresh_after_a_screen_turn(self):
+        self.response_stream.side_effect = [responses(message("Screen", True)), responses(message("Audio", True))]
+        list(self.connection.stream(b"jpeg", b"pcm", lambda: False))
+        self.session.send_realtime_input.reset_mock()
+        self.assertEqual(list(self.connection.stream(None, b"pcm", lambda: False)), ["Audio"])
+        self.assertEqual(self.client.aio.live.connect.call_count, 2)
+        self.assertFalse(any("video" in call.kwargs for call in self.session.send_realtime_input.call_args_list))
+
     def test_cancel_closes_session_while_waiting_for_more_text(self):
         receive_closed = threading.Event()
 

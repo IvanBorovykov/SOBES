@@ -36,7 +36,7 @@ fallback model where available. Turn off the checkbox to use only the active key
 `GEMINI_API_KEY` remains an optional import for existing setups; save that profile
 in the window once to keep it across launches without the environment variable.
 
-The floating toolbar provides **Подсказка**, **Ответ / код**, **Только экран**,
+The floating toolbar provides **Только звук**, **Подсказка**, **Ответ / код**, **Только экран**,
 **Очистить**, **↑ / ↓** and **Настройки…**. Keyboard shortcuts are written directly
 on the buttons. Both the toolbar and answer window move by dragging their native
 macOS title bars. Positions are saved. The answer accepts mouse/trackpad scrolling.
@@ -60,12 +60,20 @@ windows are brought back to an available display.
 
 | Hotkey (two keys together) | Action |
 |---|---|
+| ⌥Q (Option + Q) | short Live hint from recent audio only; no screen capture or image upload |
 | ⌥X (Option + X) | detailed text/code answer from recent audio + selected screenshot |
 | ⌥Z (Option + Z) | short Live hint from recent audio + selected screenshot |
 
-These are the only two global shortcuts. Use **Только экран** to send a screenshot
+These are the three global shortcuts. Use **Только экран** to send a screenshot
 without audio, **Очистить** to cancel and clear, and **↑ / ↓** or the mouse/trackpad
 to scroll. The shortcuts work while another app is focused.
+**Только звук** uses the same selected audio input and recent duration as the other
+audio modes; it does not automatically mix microphone and system audio. It skips
+screen capture, including REST fallback. Switching between audio-only and screen
+Live modes starts a fresh session so old images are not used for an audio-only hint.
+Consecutive audio-only hints reuse the connection. Compare the displayed time to
+first text with the v0.1.0 observation of approximately 3.5 seconds; no new latency
+claim has been measured yet.
 
 Grant your terminal app **Microphone**, **Screen Recording** and **Accessibility** in
 System Settings → Privacy & Security, then restart the terminal.

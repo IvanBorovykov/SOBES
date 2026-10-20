@@ -33,6 +33,7 @@ class LiveConnection:
         self._connect_lock = asyncio.Lock()
         self._turn_lock = asyncio.Lock()
         self._session = None
+        self._audio_only = None
         self._context = None
         self._reader = None
         self._messages = None
@@ -116,6 +117,7 @@ class LiveConnection:
         context, self._context = self._context, None
         reader, self._reader = self._reader, None
         self._session = None
+        self._audio_only = None
         if reader is not None:
             reader.cancel()
             await asyncio.gather(reader, return_exceptions=True)
@@ -127,11 +129,16 @@ class LiveConnection:
             self._active = asyncio.current_task()
             try:
                 async with asyncio.timeout(45):
+                    audio_only = jpeg is None
+                    if self._audio_only is not None and self._audio_only != audio_only:
+                        await self._disconnect()
                     session = await self._connect()
+                    self._audio_only = audio_only
                     messages = self._messages
                     # Explicit activity boundaries avoid waiting for a VAD silence timer.
                     await session.send_realtime_input(activity_start=types.ActivityStart())
-                    await session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
+                    if jpeg is not None:
+                        await session.send_realtime_input(video=types.Blob(data=jpeg, mime_type="image/jpeg"))
                     for offset in range(0, len(pcm), 4096):
                         await session.send_realtime_input(audio=types.Blob(
                             data=pcm[offset:offset + 4096], mime_type="audio/pcm;rate=16000",

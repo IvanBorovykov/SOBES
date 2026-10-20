@@ -3,7 +3,8 @@
 
 Hotkeys (swallowed, so the focused app never sees them):
     Option+X   detailed text/code answer from recent audio + screen
-    Option+Z  short Live hint from recent audio + screen
+    Option+Z   short Live hint from recent audio + screen
+    Option+Q   short Live hint from recent audio only
 Other actions are available on the floating toolbar.
 """
 
@@ -88,7 +89,7 @@ MONITOR_INDEX = int(os.environ.get("MONITOR", "1"))  # mss index: 1 = primary di
 
 SYSTEM_INSTRUCTION = (
     "Ти — помічник на IT-співбесіді. Проаналізуй питання в доданому аудіо "
-    "(якщо додано) та задачу на скріншоті. Відповідай українською. Почни одразу "
+    "(якщо додано) та задачу на скріншоті (якщо додано). Відповідай українською. Почни одразу "
     "з прямої відповіді у 1–2 реченнях, без вступу та повторення питання. "
     "Потім додай короткі деталі. Готовий код додавай лише для задачі з кодом."
 )
@@ -96,7 +97,7 @@ USER_PROMPT = "Аудіо — останній фрагмент розмови, 
 LIVE_INSTRUCTION = (
     "Ти — помічник на IT-співбесіді. Після завершення кожної активності дай коротку "
     "відповідь українською у 1–3 реченнях на останнє питання з поточного аудіо та "
-    "поточного знімка екрана. Почни одразу з відповіді, без вступу. Не повторюй "
+    "поточного знімка екрана, якщо його додано. Якщо зображення немає, відповідай лише за аудіо. Почни одразу з відповіді, без вступу. Не повторюй "
     "попередні відповіді. Для задачі з кодом коротко поясни підхід, не диктуй код."
 )
 
@@ -104,7 +105,7 @@ OVERLAY_WIDTH = 560
 OVERLAY_HEIGHT_RATIO = 0.7
 SCROLL_STEP = 120
 
-KEY_X, KEY_Z = 7, 6
+KEY_X, KEY_Z, KEY_Q = 7, 6, 12
 MODIFIER_MASK = (
     Quartz.kCGEventFlagMaskCommand
     | Quartz.kCGEventFlagMaskShift
@@ -254,7 +255,7 @@ class Overlay:
 
     def __init__(self):
         visible = NSScreen.mainScreen().visibleFrame()
-        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 300))
+        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 340))
         frame = NSMakeRect(
             visible.origin.x + visible.size.width - OVERLAY_WIDTH - 20,
             visible.origin.y + (visible.size.height - height) / 2,
@@ -475,7 +476,7 @@ class Controls(NSObject):
             return None
         self._actions = actions
         panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(50, 50, 620, 194), NSWindowStyleMaskTitled,
+            NSMakeRect(50, 50, 620, 234), NSWindowStyleMaskTitled,
             NSBackingStoreBuffered, False,
         )
         panel.setTitle_("Помощник — перетащите окно за этот заголовок")
@@ -496,11 +497,12 @@ class Controls(NSObject):
         content.addSubview_(self._status)
         self._buttons = []
         specs = (
-            ("Подсказка  ⌥Z", "live", 14, 148, 190),
-            ("Ответ / код  ⌥X", "answer", 212, 148, 208),
+            ("Только звук  ⌥Q", "audio", 14, 188, 190),
+            ("Подсказка  ⌥Z", "live", 212, 188, 208),
+            ("Ответ / код  ⌥X", "answer", 428, 188, 178),
+            ("Только экран", "screen", 14, 148, 190),
+            ("Очистить", "clear", 212, 148, 208),
             ("Настройки…", "settings", 428, 148, 178),
-            ("Только экран", "screen", 14, 108, 190),
-            ("Очистить", "clear", 212, 108, 208),
             ("↑", "up", 428, 108, 85),
             ("↓", "down", 521, 108, 85),
         )
@@ -571,7 +573,7 @@ class Controls(NSObject):
                 setattr(self._preferences, f"{kind}_display", display["key"])
                 visible = display["screen"].visibleFrame()
                 if kind == "overlay":
-                    height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 300))
+                    height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 340))
                     panel.setContentSize_(NSMakeSize(OVERLAY_WIDTH, height))
                 size = panel.frame().size
                 origin = getattr(self._preferences, f"{kind}_origin")
@@ -594,7 +596,7 @@ class Controls(NSObject):
     def update_status(self):
         displays = {display["key"]: display for display in get_displays()}
         lines = []
-        for name, title in (("capture_display", "Модель видит"), ("overlay_display", "Подсказка"),
+        for name, title in (("capture_display", "Экран для снимков"), ("overlay_display", "Подсказка"),
                             ("controls_display", "Панель кнопок")):
             display = displays.get(getattr(self._preferences, name))
             lines.append(f"{title}: {display['title'] if display else 'экран отключён — откройте настройки'}")
@@ -687,14 +689,15 @@ class Assistant:
         self.capture_display_id = Quartz.CGMainDisplayID()
         self._generation = 0  # bumped on every trigger/clear; stale streams stop rendering
 
-    def analyze(self, screen_only=False, live=False):
+    def analyze(self, screen_only=False, live=False, audio_only=False):
         self._generation += 1
         started = time.perf_counter()
-        self._overlay.show_text("⏳ Готую знімок екрана…  ·  «Очистить» — скасувати", reset_scroll=True)
+        preparing = "Готую аудіо без екрана" if audio_only else "Готую знімок екрана"
+        self._overlay.show_text(f"⏳ {preparing}…  ·  «Очистить» — скасувати", reset_scroll=True)
         threading.Thread(
             target=self._run_live if live else self._run,
             args=(self._generation, started, screen_only), daemon=True,
-            kwargs={"capture_display_id": self.capture_display_id},
+            kwargs={"capture_display_id": self.capture_display_id, "audio_only": audio_only},
         ).start()
 
     def clear(self):
@@ -722,23 +725,31 @@ class Assistant:
         if generation == self._generation:
             self._overlay.show_text(self.keys.redact(text))
 
-    def _run(self, generation, started, screen_only, prepared_inputs=None, capture_display_id=None):
+    def _run(self, generation, started, screen_only, prepared_inputs=None, capture_display_id=None, audio_only=False):
         try:
             if generation != self._generation:
                 return
             if prepared_inputs is None:
-                screenshot = self._capture_pool.submit(
+                screenshot = None if audio_only else self._capture_pool.submit(
                     capture_screenshot, self.capture_display_id if capture_display_id is None else capture_display_id,
                 )
                 wav = None if screen_only else self._audio.wav_bytes()
-                jpeg = screenshot.result()
+                jpeg = screenshot.result() if screenshot is not None else None
             else:
                 jpeg, wav = prepared_inputs
         except Exception as e:
             self._show(generation, f"⚠️ Не вдалося підготувати запит: {e}")
             return
-        prompt = USER_PROMPT if wav else "Зображення — поточний екран. Аудіо не додано."
-        contents = [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), prompt]
+        if audio_only and not wav:
+            self._show(generation, "Аудіобуфер ще порожній. Повторіть після запису звуку.")
+            return
+        if audio_only:
+            prompt = "Аудіо — останній фрагмент розмови. Екран не додано. Дай коротку відповідь у 1–3 реченнях."
+        else:
+            prompt = USER_PROMPT if wav else "Зображення — поточний екран. Аудіо не додано."
+        contents = [prompt]
+        if jpeg is not None:
+            contents.insert(0, types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"))
         if wav:
             contents.insert(0, types.Part.from_bytes(data=wav, mime_type="audio/wav"))
 
@@ -750,7 +761,7 @@ class Assistant:
                     continue
                 if generation != self._generation:
                     return
-                mode = "екран + аудіо" if wav else "тільки екран"
+                mode = "тільки аудіо" if audio_only else "екран + аудіо" if wav else "тільки екран"
                 status = "Резервна модель" if index else "Очікую відповідь"
                 self._show(generation, f"⏳ {status} · {model}\n{mode}  ·  «Очистить» — скасувати")
                 # Only set thinking levels for models whose capabilities are known.
@@ -807,18 +818,18 @@ class Assistant:
                     return
         self._show(generation, self.keys.unavailable_message())
 
-    def _run_live(self, generation, started, screen_only=False, capture_display_id=None):
+    def _run_live(self, generation, started, screen_only=False, capture_display_id=None, audio_only=False):
         text = ""
         jpeg = pcm = None
-        header = f"Live · {LIVE_MODEL}\n\n"
+        header = f"Live · {'тільки аудіо' if audio_only else 'екран + аудіо'} · {LIVE_MODEL}\n\n"
         try:
             if generation != self._generation:
                 return
-            screenshot = self._capture_pool.submit(
+            screenshot = None if audio_only else self._capture_pool.submit(
                 capture_screenshot, self.capture_display_id if capture_display_id is None else capture_display_id,
             )
             pcm = self._audio.pcm_bytes()
-            jpeg = screenshot.result()
+            jpeg = screenshot.result() if screenshot is not None else None
             if generation != self._generation:
                 return
             if not pcm:
@@ -840,7 +851,7 @@ class Assistant:
                             if first_text is None:
                                 first_text = now - started
                                 self.keys.succeeded(entry)
-                                header = f"Live · перший текст {first_text:.2f} с\n\n"
+                                header = f"Live · {'тільки аудіо' if audio_only else 'екран + аудіо'} · перший текст {first_text:.2f} с\n\n"
                             text += delta
                             if now - last_render >= 0.04:
                                 self._show(generation, header + text)
@@ -865,14 +876,14 @@ class Assistant:
                 self._show(generation, header + text + f"\n\n⚠️ {error}  ·  ⌥X — повторити")
             else:
                 print(f"[{LIVE_MODEL}] falling back to text stream: {self.keys.redact(error)}")
-                prepared_inputs = (jpeg, self._audio.wav_bytes(pcm)) if jpeg is not None else None
-                self._run(generation, started, screen_only, prepared_inputs, capture_display_id)
+                prepared_inputs = (jpeg, self._audio.wav_bytes(pcm)) if pcm else None
+                self._run(generation, started, screen_only, prepared_inputs, capture_display_id, audio_only=audio_only)
 
 
 # --- Global hotkeys -----------------------------------------------------------
 
 class Hotkeys:
-    """Session-level CGEventTap that swallows Option+X/Z combos. Needs Accessibility permission."""
+    """Session-level CGEventTap that swallows Option+Q/Z/X combos. Needs Accessibility permission."""
 
     def __init__(self, actions):
         self._actions = actions  # keycode -> (callable, fire_on_autorepeat)
@@ -930,6 +941,7 @@ def main():
     audio = AudioRing()
     assistant = Assistant(overlay, audio, keys)
     controls = Controls.alloc().initWithActions_({
+        "audio": lambda: assistant.analyze(live=True, audio_only=True),
         "live": lambda: assistant.analyze(live=True),
         "answer": assistant.analyze,
         "screen": lambda: assistant.analyze(screen_only=True),
@@ -941,12 +953,13 @@ def main():
     hotkeys = Hotkeys({  # noqa: F841 — must stay referenced while the run loop runs
         KEY_X: (assistant.analyze, False),
         KEY_Z: (lambda: assistant.analyze(live=True), False),
+        KEY_Q: (lambda: assistant.analyze(live=True, audio_only=True), False),
     })
 
     print(f"Recording (last {preferences.audio_seconds}s sent). Models: {PRIMARY_MODEL} → {FALLBACK_MODEL}")
-    print("⌥Z Live hint · ⌥X text/code · Ctrl+C quit")
+    print("⌥Q audio only · ⌥Z Live hint · ⌥X text/code · Ctrl+C quit")
     controls.show()
-    overlay.show_text("Готов к работе.\n\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nОстальные действия — кнопками в окне.\n\n"
+    overlay.show_text("Готов к работе.\n\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nОстальные действия — кнопками в окне.\n\n"
                       "Окно можно перемещать за стандартный заголовок сверху.\n"
                       "Мониторы и длительность аудио выбираются в настройках.", reset_scroll=True)
     if not keys.entries():
