@@ -36,6 +36,8 @@ final class AudioTap {
             throw NSError(domain: "SOBES.AudioTap", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "Не удалось преобразовать системный звук в 16 кГц mono"])
         }
+        // Remapping alone picks channel 0 and loses right-only call audio.
+        converter.downmix = true
         inputFormat = format
         self.converter = converter
         let settings: [String: Any] = [
