@@ -1,0 +1,54 @@
+[
+  {
+    "pipeline": "Текущий ⌥Q: Live → 2.5 / 3 Flash",
+    "n": 12,
+    "correct": 8,
+    "median_first_correct_s": 2.2736381459981203,
+    "range_first_correct_s": [
+      1.7041072089923546,
+      2.6424876250093803
+    ],
+    "median_total_correct_s": 3.1994550625095144,
+    "correct_under_one_second": 0,
+    "median_first_all_s": 1.9847856045234948
+  },
+  {
+    "pipeline": "Прямое аудио → 3.5 Flash-Lite",
+    "n": 12,
+    "correct": 10,
+    "median_first_correct_s": 1.07493829150917,
+    "range_first_correct_s": [
+      0.9153255409910344,
+      1.3219849170418456
+    ],
+    "median_total_correct_s": 1.3551822710433044,
+    "correct_under_one_second": 3,
+    "median_first_all_s": 1.072651541500818
+  },
+  {
+    "pipeline": "Transcribe Live → 3.5 Flash-Lite",
+    "n": 12,
+    "correct": 11,
+    "median_first_correct_s": 0.9302253749920055,
+    "range_first_correct_s": [
+      0.7874490829999559,
+      1.3438936250167899
+    ],
+    "median_total_correct_s": 1.1163150829961523,
+    "correct_under_one_second": 7,
+    "median_first_all_s": 0.9458981040224899
+  },
+  {
+    "pipeline": "Transcribe Live + словарь → 3.5 Flash-Lite",
+    "n": 12,
+    "correct": 12,
+    "median_first_correct_s": 0.9906567500147503,
+    "range_first_correct_s": [
+      0.7566962079727091,
+      1.8003392080427147
+    ],
+    "median_total_correct_s": 1.1100386460020673,
+    "correct_under_one_second": 6,
+    "median_first_all_s": 0.9906567500147503
+  }
+]
