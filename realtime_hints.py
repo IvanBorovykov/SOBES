@@ -308,9 +308,9 @@ class RealtimeHints:
         """Reveal the latest answer; never concatenate separate spoken turns."""
         channel = self._channel
         self.request_flush()
-        # Give an actual in-flight question time to finish. An idle/empty stream
-        # gets only a short grace period before the on-demand fallback.
-        deadline = time.monotonic() + (2.5 if channel.receiving else .8)
+        # A missing Live answer must not add seconds before the REST request.
+        # Ready text is still revealed immediately; only the first token has this deadline.
+        deadline = time.monotonic() + .35
         revision = -1
         turn = None
         has_text = False

@@ -346,7 +346,7 @@ class RealtimeTests(unittest.TestCase):
         self.engine._loop.call_soon_threadsafe(flood)
         self.assertTrue(done.wait(1))
 
-    def test_an_inflight_question_is_allowed_to_finish_after_the_idle_grace(self):
+    def test_inflight_answer_within_grace_is_shown(self):
         channel = self.engine._channel
         self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
         session = self.audio_session()
@@ -355,7 +355,7 @@ class RealtimeTests(unittest.TestCase):
             self.emit(session, message(activity=types.VoiceActivityType.ACTIVITY_END))
             self.emit(session, message("Ready after idle grace", True))
 
-        timer = threading.Timer(1, answer)
+        timer = threading.Timer(.1, answer)
         self.addCleanup(timer.cancel)
         timer.start()
         self.assertEqual(list(self.engine.stream( lambda: False))[-1].text, "Ready after idle grace")
@@ -364,7 +364,15 @@ class RealtimeTests(unittest.TestCase):
         started = time.monotonic()
         with self.assertRaises(TimeoutError):
             list(self.engine.stream( lambda: False))
-        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertLess(time.monotonic() - started, .65)
+
+    def test_inflight_question_does_not_delay_reserve_by_seconds(self):
+        channel = self.engine._channel
+        self.engine._receive_message(channel, message(activity=types.VoiceActivityType.ACTIVITY_START))
+        started = time.monotonic()
+        with self.assertRaises(TimeoutError):
+            list(self.engine.stream(lambda: False))
+        self.assertLess(time.monotonic() - started, .65)
 
 
 if __name__ == "__main__":

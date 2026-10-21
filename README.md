@@ -149,7 +149,7 @@ to ⌥Z, ⌥X and on-demand fallback; continuous Live hints receive audio as it 
 instead of replaying that buffer. Increasing the duration can use audio already
 retained since launch.
 
-Для **⌥Q** проверена отдельная резервная цепочка: `gemini-2.5-flash` с thinking budget 0 → `gemini-3-flash-preview` с minimal thinking. Аудио сохраняется перед ожиданием Live, чтобы не потерять начало вопроса. Тайм-аут отдельного голосового REST-вызова — 10 с; до появления текста можно перейти на резерв, после первых слов повторной отправки нет. Общее ожидание может включать Live и несколько попыток. Экранные режимы и вопросы по файлам используют прежние модели. Сравнение и ограничения: [benchmarks/REPORT.md](benchmarks/REPORT.md).
+Для **⌥Q** проверена отдельная резервная цепочка: `gemini-2.5-flash` с thinking budget 0 → `gemini-3-flash-preview` с minimal thinking. Аудио сохраняется перед ожиданием Live, чтобы не потерять начало вопроса. Готовый Live-ответ показывается сразу; если первых слов нет за 350 мс, запускается REST. Это ограничение касается только начала ответа, не его продолжения. Тайм-аут отдельного голосового REST-вызова — 10 с; до появления текста можно перейти на резерв, после первых слов повторной отправки нет. Общее ожидание может включать Live и несколько попыток. Экранные режимы и вопросы по файлам используют прежние модели. Сравнение и ограничения: [benchmarks/REPORT.md](benchmarks/REPORT.md).
 
 Fast hints default to `gemini-3.1-flash-live-preview` with
 `thinking_level="minimal"`, based on the local synthetic latency probes in
