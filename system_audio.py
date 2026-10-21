@@ -1,5 +1,6 @@
 """Native macOS system audio -> bounded 20 ms PCM callbacks, without screen frames."""
 import subprocess
+import platform
 import tempfile
 import threading
 from pathlib import Path
@@ -24,8 +25,10 @@ class SystemAudio:
 
     def _start(self):
         try:
-            source = Path(__file__).resolve().parent / 'native/system_audio.swift'
-            binary = source.parent.parent / '__pycache__/system_audio'
+            version = tuple(int(part) for part in platform.mac_ver()[0].split('.')[:2])
+            name = 'audio_tap' if version >= (14, 2) else 'system_audio'
+            source = Path(__file__).resolve().parent / f'native/{name}.swift'
+            binary = source.parent.parent / f'__pycache__/{name}'
             binary.parent.mkdir(exist_ok=True)
             if not binary.exists() or binary.stat().st_mtime_ns < source.stat().st_mtime_ns:
                 with tempfile.TemporaryDirectory(prefix='audio-build-', dir=binary.parent) as directory:
