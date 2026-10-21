@@ -42,14 +42,14 @@ class Channel:
 
 
 class RealtimeHints:
-    def __init__(self, keys, model, instruction, on_status=None):
+    def __init__(self, keys, model, instruction, on_status=None, config=None, channel=None):
         self.keys, self.model = keys, model
         self._voice_active = False
         self._last_loud = 0
         self._voiced_frames = 0
         self._on_status = on_status
         self._condition = threading.Condition()
-        self._channel = Channel()
+        self._channel = channel if channel is not None else Channel()
         self.enabled = True
         self._closed = False
         self._generation = 0
@@ -74,6 +74,8 @@ class RealtimeHints:
             self._config.thinking_config = types.ThinkingConfig(thinking_level="minimal")
         elif "2.5" in model:
             self._config.thinking_config = types.ThinkingConfig(thinking_budget=0)
+        if config is not None:
+            self._config = config
         self._lifecycle = asyncio.Lock()
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="realtime-hints")

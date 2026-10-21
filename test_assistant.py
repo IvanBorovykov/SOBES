@@ -323,6 +323,40 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("готово до натискання", self.shown()[-1])
         self.assertTrue(callable(realtime.stream.call_args.args[0]))
 
+    def test_transcribed_question_is_text_only_and_visible(self):
+        self.app._realtime = Mock(spec=assistant.LiveTranscription)
+        self.app._realtime.question.return_value = 'WHERE versus HAVING in SQL?'
+        self.audio._seconds = 8
+        self.generate.return_value = iter([SimpleNamespace(text='WHERE filters rows.')])
+        self.app._run_live(0, time.perf_counter(), audio_only=True)
+        self.capture.assert_not_called()
+        self.audio.request_audio.assert_not_called()
+        request=self.generate.call_args.kwargs
+        self.assertEqual(request['model'],assistant.TEXT_AUDIO_MODEL)
+        self.assertEqual(request['config'].thinking_config.thinking_level,'MINIMAL')
+        self.assertTrue(all(isinstance(part,str) for part in request['contents']))
+        self.assertIn('WHERE versus HAVING',request['contents'][0])
+        self.assertIn('Питання:',self.shown()[-1])
+
+    def test_transcription_failure_preserves_keypress_audio_for_reserve(self):
+        self.app._realtime = Mock(spec=assistant.LiveTranscription)
+        self.audio._seconds=8
+        def fail(*args):
+            self.audio.pcm_bytes.return_value=b'later speech'
+            raise TimeoutError('STT delayed')
+        self.app._realtime.question.side_effect=fail
+        self.generate.return_value=iter([SimpleNamespace(text='Reserve answer')])
+        with patch.object(assistant,'TRANSCRIPT_MODE',True):
+            self.app._run_live(0,time.perf_counter(),audio_only=True)
+        self.audio.request_audio.assert_called_once_with(b'pcm')
+        self.assertEqual(self.generate.call_args.kwargs['model'],assistant.TEXT_AUDIO_MODEL)
+
+    def test_cancelled_transcription_cannot_start_answer_for_old_question(self):
+        self.app._realtime=Mock(spec=assistant.LiveTranscription)
+        self.app._realtime.question.side_effect=lambda *args:(self.app.clear() or 'old question')
+        self.app._run_live(0,time.perf_counter(),audio_only=True)
+        self.generate.assert_not_called()
+
     def test_realtime_partial_failure_does_not_replay_audio(self):
         def stream(*args):
             yield Hint(text="Partial", first_text_at=time.monotonic())
