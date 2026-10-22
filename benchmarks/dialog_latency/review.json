@@ -1,0 +1,189 @@
+{
+  "reviewer": "independent read-only production-senior review",
+  "method": "Manual inspection of complete returned answers against explicit per-turn requirements. Original source transcripts and timings retained. No automatic keyword-only grading.",
+  "series": {
+    "baseline": {
+      "source": "baseline.jsonl",
+      "sha256": "22a6685f187b94a358a7761d496ec89cea7f54c38b2ad83cbbc85fb843026628",
+      "n": 8,
+      "correct": 5,
+      "all_first_text_median_s": 0.7696745000430383,
+      "correct_first_text_median_s": 0.774264125037007,
+      "first_text_min_s": 0.6863427909556776,
+      "first_text_max_s": 1.055098749930039,
+      "turns": [
+        {
+          "case": "numbers",
+          "requirement": "States three elements",
+          "correct": true,
+          "note": "Correct count."
+        },
+        {
+          "case": "numbers_follow",
+          "requirement": "Adds 23 as one new element and returns 60",
+          "correct": false,
+          "note": "Baseline gives a per-element addition formula, not the required total."
+        },
+        {
+          "case": "numbers_change",
+          "requirement": "Removes 11 from 7,11,19,23 and returns 49",
+          "correct": false,
+          "note": "Baseline incorrectly returns 54."
+        },
+        {
+          "case": "topic",
+          "requirement": "Explains synchronous time.sleep blocks the event loop",
+          "correct": true,
+          "note": "Correct blocking explanation."
+        },
+        {
+          "case": "follow",
+          "requirement": "Identifies the concrete replacement await asyncio.sleep()",
+          "correct": false,
+          "note": "Baseline suggests generic async/await, queues or threads without naming the replacement."
+        },
+        {
+          "case": "sql",
+          "requirement": "Distinguishes row filtering before grouping and aggregate filtering after grouping",
+          "correct": true,
+          "note": "Correct distinction in the given context."
+        },
+        {
+          "case": "sql_follow",
+          "requirement": "Answers HAVING for direct SUM aggregate filtering",
+          "correct": true,
+          "note": "Correct within the two-clause question."
+        },
+        {
+          "case": "correction",
+          "requirement": "Switches topic and returns 42",
+          "correct": true,
+          "note": "Correct sum and topic switch."
+        }
+      ]
+    },
+    "final": {
+      "source": "final.jsonl",
+      "sha256": "425ac85b0a7b5f0783fdeba491ef55a490c1c35f28d319e6b33dd7d10cbc0700",
+      "n": 8,
+      "correct": 8,
+      "all_first_text_median_s": 0.9328566870535724,
+      "correct_first_text_median_s": 0.9328566870535724,
+      "first_text_min_s": 0.7961599580012262,
+      "first_text_max_s": 1.3877674160758033,
+      "turns": [
+        {
+          "case": "numbers",
+          "requirement": "States three elements",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "numbers_follow",
+          "requirement": "Adds 23 as one new element and returns 60",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "numbers_change",
+          "requirement": "Removes 11 from 7,11,19,23 and returns 49",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "topic",
+          "requirement": "Explains synchronous time.sleep blocks the event loop",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "follow",
+          "requirement": "Identifies the concrete replacement await asyncio.sleep()",
+          "correct": true,
+          "note": "Correct substantive answer; final follow-up explicitly contains await asyncio.sleep()."
+        },
+        {
+          "case": "sql",
+          "requirement": "Distinguishes row filtering before grouping and aggregate filtering after grouping",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "sql_follow",
+          "requirement": "Answers HAVING for direct SUM aggregate filtering",
+          "correct": true,
+          "note": "Correct substantive answer."
+        },
+        {
+          "case": "correction",
+          "requirement": "Switches topic and returns 42",
+          "correct": true,
+          "note": "Correct substantive answer."
+        }
+      ]
+    },
+    "native": {
+      "source": "native.jsonl",
+      "sha256": "40cbef4e04ec53027132bc6582a6e014be0eea9dc1f8529f3c72208527931142",
+      "n": 3,
+      "correct": 3,
+      "all_first_text_median_s": 0.9202989579644054,
+      "correct_first_text_median_s": 0.9202989579644054,
+      "first_text_min_s": 0.8930446670856327,
+      "first_text_max_s": 0.9907254580175504,
+      "turns": [
+        {
+          "case": "numbers",
+          "requirement": "Correctly counts 7,11,19 as 3 elements from native system-audio capture.",
+          "correct": true,
+          "note": "Complete answer manually checked against the question and preceding dialogue."
+        },
+        {
+          "case": "numbers_follow",
+          "requirement": "Uses previous list and returns 60 after adding 23.",
+          "correct": true,
+          "note": "Complete answer manually checked against the question and preceding dialogue."
+        },
+        {
+          "case": "sql",
+          "requirement": "Explains WHERE row filtering before grouping versus HAVING aggregate filtering after grouping.",
+          "correct": true,
+          "note": "Complete answer manually checked against the question and preceding dialogue."
+        }
+      ]
+    },
+    "overlap": {
+      "source": "overlap.jsonl",
+      "sha256": "4a185e076e991648c3d931fbbd704a87973f5902ede8ceda25c11964c3a53b05",
+      "n": 2,
+      "correct": 2,
+      "all_first_text_median_s": 0.9569512290181592,
+      "correct_first_text_median_s": 0.9569512290181592,
+      "first_text_min_s": 0.9214094580383971,
+      "first_text_max_s": 0.9924929999979213,
+      "turns": [
+        {
+          "case": "continued_listening",
+          "requirement": "First response remains complete and returns 3 while the next question begins during its active request.",
+          "correct": true,
+          "note": "Complete answer manually checked against the question and preceding dialogue."
+        },
+        {
+          "case": "followup_captured_during_previous_answer",
+          "requirement": "Question spoken while previous request was active is captured, linked to previous list, and answered 60.",
+          "correct": true,
+          "note": "Complete answer manually checked against the question and preceding dialogue."
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Eight synthetic spoken turns in a single ordered dialogue are not a general accuracy or latency guarantee.",
+    "Baseline incorrect answers are included in the all-response latency metric, but excluded from the separately labelled correct-answer latency.",
+    "No evidence of reduced median latency versus baseline: final prioritizes correct conversational context.",
+    "The fixed final 350 ms hedge launches a second model request before the first text in all eight final turns; extra quota/cost is expected.",
+    "Native check uses afplay of synthetic Russian speech through the real CoreAudio system-audio capture path; it does not establish live Discord-call performance.",
+    "Overlap check feeds synthetic PCM into the real STT/LLM path. The next question starts 50 ms after the first request, during STT finalization, then continues through answer generation; this is not a native-call overlap test.",
+    "Native and overlap samples use only 3 and 2 observations respectively. Failed pilot benchmark-harness runs are excluded from these authoritative output files."
+  ]
+}

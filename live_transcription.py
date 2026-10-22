@@ -9,6 +9,8 @@ import queue
 from google.genai import types
 from realtime_hints import RealtimeHints, Channel
 
+PACKET_BYTES = 3200
+
 MODEL = 'gemini-3.5-transcribe-live'
 VOCABULARY = ['SQL', 'WHERE', 'HAVING', 'Python', 'async def', 'time.sleep',
               'asyncio.sleep', 'бинарный поиск']
@@ -33,13 +35,17 @@ class TranscriptionChannel(Channel):
 
     def reset_audio(self):
         # Cover the 1.2s finalization hold and two 2s transport deadlines.
-        self.audio = queue.Queue(maxsize=300)  # At most six seconds, 192 KB PCM.
+        self.audio = queue.Queue(maxsize=192000 // PACKET_BYTES)  # 100 ms packets, at most six seconds.
 
 
 class LiveTranscription(RealtimeHints):
     def __init__(self, keys, on_status=None):
         self._segments = deque(maxlen=200)
         self._pending = None
+        self._pcm_pending = bytearray()
+        self._pcm_started = 0
+        self.entry_id = None
+        self.metrics = {'pcm_bytes': 0, 'audio_packets': 0, 'max_queue_ms': 0}
         super().__init__(keys, MODEL, '', on_status, channel=TranscriptionChannel(), config=types.LiveConnectConfig(
             response_modalities=['TEXT'], input_audio_transcription=types.AudioTranscriptionConfig(
                 language_codes=['ru-RU'], custom_vocabulary=VOCABULARY),
@@ -50,14 +56,42 @@ class LiveTranscription(RealtimeHints):
         # STT has no answers to invalidate when someone starts talking again.
         channel.receiving = True
 
+    async def _session(self, channel, entry, generation):
+        self.entry_id = entry.id
+        try:
+            await super()._session(channel, entry, generation)
+        finally:
+            self.entry_id = None
+
     def _invalidate(self, channel, error=''):
         with self._condition:
             self._segments.clear()
+            self._pcm_pending.clear()
             if self._pending:
                 self._pending.error = error or 'Распознавание переподключается'
                 self._pending.event.set()
                 self._pending = None
             super()._invalidate(channel, error)
+
+    def _flush_pcm(self):
+        if self._pcm_pending:
+            self._channel.audio.put_nowait((self._pcm_started, bytes(self._pcm_pending)))
+            self._pcm_pending.clear()
+
+    def offer_audio(self, pcm):
+        # Group five 20 ms capture frames. Keypress flushes the partial packet
+        # before its marker, so batching never waits for more speech at Q.
+        with self._condition:
+            if not self.enabled or self._closed or not self._channel.hint.ready:
+                return
+            if not self._pcm_pending:
+                self._pcm_started = time.monotonic()
+            self._pcm_pending.extend(pcm)
+            if len(self._pcm_pending) >= PACKET_BYTES:
+                try:
+                    self._flush_pcm()
+                except queue.Full:
+                    self._invalidate(self._channel, 'Очередь звука переполнена; переподключаюсь')
 
     async def _sender(self, channel, session, generation):
         await asyncio.wait_for(session.send_realtime_input(activity_start=types.ActivityStart()), 2)
@@ -85,14 +119,19 @@ class LiveTranscription(RealtimeHints):
                 window_started = time.monotonic()
                 window_has_signal = False
             else:
+                self.metrics['max_queue_ms'] = max(self.metrics['max_queue_ms'],
+                                                  (time.monotonic() - captured) * 1000)
                 await asyncio.wait_for(session.send_realtime_input(audio=types.Blob(
                     data=item, mime_type='audio/pcm;rate=16000')), 2)
+                self.metrics['audio_packets'] += 1
+                self.metrics['pcm_bytes'] += len(item)
                 window_has_signal = window_has_signal or any(item)
                 # Bound the size of a manual turn even if Q has not been pressed.
                 # These markers use the same FIFO; only one end may be outstanding.
                 if time.monotonic() - window_started >= 30:
                     with self._condition:
                         if self._pending is None and window_has_signal:
+                            self._flush_pcm()
                             ticket = Finalize(time.monotonic(), 60, internal=True)
                             channel.audio.put_nowait((ticket.pressed, ticket))
                             self._pending = ticket
@@ -130,6 +169,7 @@ class LiveTranscription(RealtimeHints):
                 raise ConnectionError('Предыдущая финализация ещё не завершена')
             ticket = Finalize(time.monotonic(), seconds)
             # Same lock as offer_audio: this marker follows every earlier PCM frame.
+            self._flush_pcm()
             self._channel.audio.put_nowait((ticket.pressed, ticket))
             self._pending = ticket
         deadline = time.monotonic() + 1.5
@@ -137,6 +177,7 @@ class LiveTranscription(RealtimeHints):
             if ticket.event.wait(.02):
                 if ticket.error:
                     raise ConnectionError(ticket.error)
+                self.metrics['finalize_ms'] = (time.monotonic() - ticket.pressed) * 1000
                 return ticket.text
             if time.monotonic() > deadline:
                 raise TimeoutError('Распознавание не завершило вопрос вовремя')

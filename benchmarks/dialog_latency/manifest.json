@@ -1,0 +1,50 @@
+[
+  {
+    "case": "numbers",
+    "question": "Давай обсудим конкретный список чисел: семь, одиннадцать, девятнадцать. Сколько в нём элементов?",
+    "gold": "3 elements",
+    "sha256": "a7f0b431622dbbbcec7f396cbc39797a3088c0431847924022cc7d772b6fbdcf"
+  },
+  {
+    "case": "numbers_follow",
+    "question": "А если добавить к нему число двадцать три, какая будет сумма всех элементов?",
+    "gold": "60",
+    "sha256": "dba5530d83911a14019a0d4fc2b390e954bd6fe35193e94bc264cb583d24750a"
+  },
+  {
+    "case": "numbers_change",
+    "question": "Теперь убери из этого списка число одиннадцать. Какая получится сумма?",
+    "gold": "49",
+    "sha256": "a51a6632b8052626cc091524709037cd07b5240dd1e86c5d12c612db1449700b"
+  },
+  {
+    "case": "topic",
+    "question": "Сменим тему. В Python я использую asyncio и вызываю time.sleep внутри async def. Блокируется ли event loop?",
+    "gold": "yes, blocks",
+    "sha256": "9dce1e9891d87a2593af72d4d391c3527f935c537620236086122f9826c18098"
+  },
+  {
+    "case": "follow",
+    "question": "А чем заменить этот вызов, чтобы остальные задачи продолжали работать?",
+    "gold": "await asyncio.sleep",
+    "sha256": "adcd35ed29b1f26d0498999125aef615636bb94c62caf8805ceb565b8ddffb29"
+  },
+  {
+    "case": "sql",
+    "question": "Теперь SQL. Чем WHERE отличается от HAVING?",
+    "gold": "rows before grouping vs aggregate filtering",
+    "sha256": "2361c0043a66758f905d249691c4326b79876bcdf1b0c472d7aaedab4fd9c373"
+  },
+  {
+    "case": "sql_follow",
+    "question": "А в каком из этих двух условий можно использовать SUM?",
+    "gold": "HAVING",
+    "sha256": "37852ebe0a44be537f80a143220d302fa55d37119f68d849f6a0c086a96e0800"
+  },
+  {
+    "case": "correction",
+    "question": "Нет, другой вопрос. Сколько будет семнадцать плюс двадцать пять?",
+    "gold": "42",
+    "sha256": "8ae4bb910dbc5633162745616f880058589197a14c76e0f7996a8190fc37e01a"
+  }
+]

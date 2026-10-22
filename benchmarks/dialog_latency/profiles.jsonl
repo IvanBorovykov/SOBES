@@ -1,0 +1,12 @@
+{"trial": 0, "profile": 0, "first_s": 0.7302930420264602, "total_s": 0.9011773749953136, "text": "Вместо `time.sleep` в асинхронных функциях нужно использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 0, "profile": 1, "first_s": 0.6359255829593167, "total_s": 0.7118592499755323, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 0, "profile": 2, "first_s": 0.6127254579914734, "total_s": 0.7155564579879865, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`, чтобы не блокировать выполнение всего इवेंट-лупа (event loop).", "status": "ok"}
+{"trial": 0, "profile": 3, "first_s": 1.097928750095889, "total_s": 1.1990970000624657, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 1, "profile": 0, "first_s": 0.44948629196733236, "total_s": 0.5329413750441745, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 1, "profile": 1, "first_s": 0.4567230419488624, "total_s": 0.5573677499778569, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 1, "profile": 2, "first_s": 0.7124105830444023, "total_s": 0.7933287910418585, "text": "Вместо `time.sleep` в асинхронных функциях нужно использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 1, "profile": 3, "first_s": 0.5307364170439541, "total_s": 0.6416104170493782, "text": "Вместо `time.sleep` в асинхронных функциях нужно использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 2, "profile": 0, "first_s": 0.5865996669745073, "total_s": 0.6702980420086533, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 2, "profile": 1, "first_s": 0.6735108749708161, "total_s": 0.7703675410011783, "text": "Вместо `time.sleep` в асинхронных функциях следует использовать `await asyncio.sleep()`, чтобы не блокировать выполнение всего потока.", "status": "ok"}
+{"trial": 2, "profile": 2, "first_s": 0.6730789999710396, "total_s": 0.6827920828945935, "text": "Для замены `time.sleep` в асинхронной функции следует использовать `await asyncio.sleep()`.", "status": "ok"}
+{"trial": 2, "profile": 3, "first_s": 0.46204008301720023, "total_s": 0.547517416998744, "text": "Вместо `time.sleep` в асинхронных функциях нужно использовать `await asyncio.sleep()`.", "status": "ok"}

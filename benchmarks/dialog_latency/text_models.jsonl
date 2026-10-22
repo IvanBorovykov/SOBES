@@ -1,0 +1,12 @@
+{"trial": 0, "model": "gemini-3.5-flash-lite", "status": "ok", "profile": 0, "first_s": 0.6414905419806018, "total_s": 0.754241916933097, "text": "50. До попередньої суми 37 додалося нове число. Це дає кінцевий результат."}
+{"trial": 0, "model": "gemini-2.5-flash-lite", "status": "unavailable"}
+{"trial": 0, "model": "gemini-3.1-flash-lite", "status": "error", "error": "The read operation timed out"}
+{"trial": 0, "model": "gemma-4-26b-a4b-it", "status": "ok", "profile": 0, "first_s": 11.65692133398261, "total_s": 12.000587166985497, "text": "60. Це сума чисел 7, 11, 19 та 23."}
+{"trial": 0, "model": "gemma-4-31b-it", "status": "error", "error": "The read operation timed out"}
+{"trial": 0, "model": "gemini-omni-flash-preview", "status": "unavailable"}
+{"trial": 1, "model": "gemini-3.5-flash-lite", "status": "ok", "profile": 0, "first_s": 0.4667706659529358, "total_s": 0.6348381249699742, "text": "`asyncio.sleep()`\n\nЦе асинхронний аналог, який зупиняє виконання поточної корутини, звільняючи event loop для обробки інших завдань. Не забудь додати перед ним `await`."}
+{"trial": 1, "model": "gemini-2.5-flash-lite", "status": "unavailable"}
+{"trial": 1, "model": "gemini-3.1-flash-lite", "status": "ok", "profile": 0, "first_s": 6.481748374993913, "total_s": 6.617685750010423, "text": "Використовуйте `await asyncio.sleep()`. Цей виклик дозволяє event loop перемикатися на інші завдання, поки програма очікує завершення таймера."}
+{"trial": 1, "model": "gemma-4-26b-a4b-it", "status": "error", "error": "500 INTERNAL. {'error': {'code': 500, 'message': 'Internal error encountered.', 'status': 'INTERNAL'}}"}
+{"trial": 1, "model": "gemma-4-31b-it", "status": "error", "error": "500 INTERNAL. {'error': {'code': 500, 'message': 'Internal error encountered.', 'status': 'INTERNAL'}}"}
+{"trial": 1, "model": "gemini-omni-flash-preview", "status": "unavailable"}

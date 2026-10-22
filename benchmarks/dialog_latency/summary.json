@@ -1,0 +1,92 @@
+{
+  "baseline": {
+    "n": 8,
+    "median_first_s": 0.7696745000430383,
+    "range_first_s": [
+      0.6863427909556776,
+      1.055098749930039
+    ],
+    "sha256": "22a6685f187b94a358a7761d496ec89cea7f54c38b2ad83cbbc85fb843026628",
+    "correct": 5
+  },
+  "dialog_batched_race": {
+    "n": 8,
+    "median_first_s": 1.008097812475171,
+    "range_first_s": [
+      0.9145156659651548,
+      1.214644916006364
+    ],
+    "sha256": "00801cdbfe9c28fbc48194919922a37282df8d4107a66bae10be953b5844effe"
+  },
+  "speculative": {
+    "n": 8,
+    "median_first_s": 1.0100126455072314,
+    "range_first_s": [
+      0.8533678749809042,
+      1.1122501250356436
+    ],
+    "sha256": "dcbddb1c376eb64d96c29de63ba813d7a81a50745a6f1f863cd6d6a0a5749cc9"
+  },
+  "context_single_100ms": {
+    "n": 8,
+    "median_first_s": 0.9406227499712259,
+    "range_first_s": [
+      0.8647786659421399,
+      1.5434204589109868
+    ],
+    "sha256": "bd990899cc285d1509e919614264c183aca488afd199016ffd23f92a2939d613"
+  },
+  "context_single_20ms": {
+    "n": 8,
+    "median_first_s": 0.9339812500402331,
+    "range_first_s": [
+      0.771512083010748,
+      1.0844112079357728
+    ],
+    "sha256": "4573544ee2d47100ca245eb70931a2ad8d2798d959c7a2d62cec5b86c1d774c7"
+  },
+  "final": {
+    "n": 8,
+    "median_first_s": 0.9328566870535724,
+    "range_first_s": [
+      0.7961599580012262,
+      1.3877674160758033
+    ],
+    "sha256": "425ac85b0a7b5f0783fdeba491ef55a490c1c35f28d319e6b33dd7d10cbc0700",
+    "correct": 8,
+    "median_stt_s": 0.3272265000268817,
+    "median_llm_s": 0.5776661870186217,
+    "text_attempts": 16,
+    "winner_profiles": [
+      2,
+      3,
+      1,
+      2,
+      3,
+      1,
+      2,
+      3
+    ],
+    "under_one_second": 7
+  },
+  "native": {
+    "n": 3,
+    "median_first_s": 0.9202989579644054,
+    "range_first_s": [
+      0.8930446670856327,
+      0.9907254580175504
+    ],
+    "sha256": "40cbef4e04ec53027132bc6582a6e014be0eea9dc1f8529f3c72208527931142",
+    "correct": 3
+  },
+  "overlap": {
+    "n": 2,
+    "median_first_s": 0.9569512290181592,
+    "range_first_s": [
+      0.9214094580383971,
+      0.9924929999979213
+    ],
+    "sha256": "4a185e076e991648c3d931fbbd704a87973f5902ede8ceda25c11964c3a53b05",
+    "correct": 2
+  }
+}

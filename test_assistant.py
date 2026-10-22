@@ -334,9 +334,45 @@ class AssistantTests(unittest.TestCase):
         request=self.generate.call_args.kwargs
         self.assertEqual(request['model'],assistant.TEXT_AUDIO_MODEL)
         self.assertEqual(request['config'].thinking_config.thinking_level,'MINIMAL')
-        self.assertTrue(all(isinstance(part,str) for part in request['contents']))
-        self.assertIn('WHERE versus HAVING',request['contents'][0])
+        self.assertTrue(all(part.inline_data is None for content in request['contents'] for part in content.parts))
+        self.assertIn('WHERE versus HAVING',request['contents'][0].parts[0].text)
         self.assertIn('Питання:',self.shown()[-1])
+
+    def test_dialog_followup_receives_previous_question_and_answer(self):
+        self.generate.return_value=iter([SimpleNamespace(text='There are three elements.')])
+        self.app._run_dialog(0,time.perf_counter(),'List is 7,11,19. How many?')
+        self.app._generation+=1
+        self.generate.return_value=iter([SimpleNamespace(text='60')])
+        self.app._run_dialog(1,time.perf_counter(),'Add 23; what sum?')
+        contents=self.generate.call_args.kwargs['contents']
+        self.assertEqual([c.role for c in contents],['user','model','user'])
+        self.assertIn('7,11,19',contents[0].parts[0].text)
+        self.assertEqual(contents[1].parts[0].text,'There are three elements.')
+        self.assertIn('23',contents[2].parts[0].text)
+
+    def test_clear_removes_dialog_and_late_generation_cannot_restore_it(self):
+        self.app._remember_dialog(0,'question','partial answer')
+        self.app.clear()
+        self.app._remember_dialog(0,'old','late text')
+        self.assertFalse(self.app._dialog)
+
+    def test_dialog_history_is_bounded_and_does_not_enter_file_request(self):
+        for i in range(10):self.app._remember_dialog(0,str(i),'answer'*500)
+        self.assertEqual(len(self.app._dialog),6)
+        self.assertLessEqual(len(self.app._dialog[-1][2]),1600)
+        self.generate.return_value=iter([SimpleNamespace(text='Screen answer')])
+        self.run_request(screen_only=True)
+        self.assertEqual(len(self.generate.call_args.kwargs['contents']),2)
+
+    def test_dialog_partial_failure_preserves_answer_without_model_replay(self):
+        def chunks():
+            yield SimpleNamespace(text='Partial')
+            raise RuntimeError('connection lost')
+        self.generate.return_value=chunks()
+        self.app._run_dialog(0,time.perf_counter(),'Question')
+        self.generate.assert_called_once()
+        self.assertIn('Partial',self.shown()[-1])
+        self.assertIn('connection lost',self.shown()[-1])
 
     def test_transcription_failure_preserves_keypress_audio_for_reserve(self):
         self.app._realtime = Mock(spec=assistant.LiveTranscription)

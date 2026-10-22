@@ -14,6 +14,9 @@ class TranscriptionTests(unittest.TestCase):
     def engine(self):
         e=LiveTranscription.__new__(LiveTranscription)
         e._segments=deque(maxlen=200);e._pending=None;e._condition=threading.Condition()
+        e._pcm_pending=bytearray();e._pcm_started=0
+        e._interim='';e._interim_at=0
+        e.metrics={'audio_packets':0,'pcm_bytes':0,'max_queue_ms':0}
         e._channel=TranscriptionChannel();e._channel.hint=Hint(ready=True)
         e._voice_active=False;e._last_loud=0;e._voiced_frames=0
         e.enabled=True;e._closed=False;e._generation=0;e._on_status=None
@@ -52,6 +55,25 @@ class TranscriptionTests(unittest.TestCase):
         ticket.sent=True;e._receive_message(e._channel,self.message('WHERE versus HAVING',True))
         worker.join(1);self.assertEqual(answer,['WHERE versus HAVING'])
 
+    def test_partial_packet_is_flushed_before_keypress_marker_without_padding(self):
+        e=self.engine();pcm=b'\x03\x00'*320
+        e.offer_audio(pcm)
+        self.assertTrue(e._channel.audio.empty())
+        answers=[]
+        worker=threading.Thread(target=lambda:answers.append(e.question(8,lambda:False)))
+        worker.start()
+        self.assertEqual(e._channel.audio.get(timeout=1)[1],pcm)
+        ticket=e._channel.audio.get(timeout=1)[1]
+        ticket.sent=True;e._receive_message(e._channel,self.message('current',True))
+        worker.join(1);self.assertEqual(answers,['current'])
+
+    def test_batching_preserves_every_pcm_byte_in_order(self):
+        e=self.engine();frames=[bytes([i,0])*320 for i in range(10)]
+        for frame in frames:e.offer_audio(frame)
+        self.assertEqual(e._channel.audio.qsize(),2)
+        sent=b''.join(e._channel.audio.get_nowait()[1] for _ in range(2))
+        self.assertEqual(sent,b''.join(frames))
+
     def test_finalization_excludes_segments_outside_audio_window(self):
         e=self.engine();e._segments.append((time.monotonic()-40,'stale question'))
         t=e._pending=Finalize(time.monotonic(),8,sent=True)
@@ -75,7 +97,7 @@ class TranscriptionTests(unittest.TestCase):
         for _ in range(80):  # 1.6s of continuing speech during a valid hold.
             e.offer_audio(b'\x01\x00'*320)
         self.assertTrue(e._channel.hint.ready)
-        self.assertEqual(e._channel.audio.qsize(),80)
+        self.assertEqual(e._channel.audio.qsize(),16)
         self.assertIsNotNone(e._pending)
 
     def test_later_pcm_is_not_sent_until_current_question_is_finalized(self):

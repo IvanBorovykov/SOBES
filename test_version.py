@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run experimental STT -> Flash-Lite Q; normal assistant.py remains selectable."""
+"""Beta2: streaming STT, short dialog history and multiple-key Flash-Lite Q."""
 import os
 
 if __name__ == '__main__':
