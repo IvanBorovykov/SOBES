@@ -96,7 +96,7 @@ AUDIO_FALLBACK_MODEL = os.environ.get("GEMINI_AUDIO_FALLBACK_MODEL", "gemini-3-f
 FILES_PRIMARY_MODEL = os.environ.get("GEMINI_FILES_MODEL", "gemini-3.5-flash-lite")
 FILES_FALLBACK_MODEL = os.environ.get("GEMINI_FILES_FALLBACK_MODEL", "gemini-3.8-flash")
 LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
-TRANSCRIPT_MODE = os.environ.get("SOBES_AUDIO_PIPELINE") == "transcript"
+TRANSCRIPT_MODE = os.environ.get("SOBES_AUDIO_PIPELINE", "transcript") == "transcript"
 TEXT_AUDIO_MODEL = "gemini-3.5-flash-lite"
 ANSWER_HEDGE_SECONDS = .35
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE")  # substring of an input device name, e.g. "BlackHole"
@@ -580,7 +580,7 @@ class Controls(NSObject):
             return None
         self._actions = actions
         panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(50, 50, 620, 294), NSWindowStyleMaskTitled,
+            NSMakeRect(50, 50, 620, 334), NSWindowStyleMaskTitled,
             NSBackingStoreBuffered, False,
         )
         panel.setTitle_("Помощник — перетащите окно за этот заголовок")
@@ -616,11 +616,16 @@ class Controls(NSObject):
         self._names = [spec[1] for spec in specs]
         for index, (title, name, x, y, width) in enumerate(specs):
             button = NSButton.buttonWithTitle_target_action_(title, self, "press:")
-            button.setFrame_(NSMakeRect(x, y, width, 32))
+            button.setFrame_(NSMakeRect(x, y + 40, width, 32))
             button.setFont_(NSFont.systemFontOfSize_(12))
             button.setTag_(index)
             content.addSubview_(button)
             self._buttons.append(button)
+        quit_button = NSButton.buttonWithTitle_target_action_("Закрыть полностью", self, "quit:")
+        quit_button.setFrame_(NSMakeRect(14, 128, 592, 32))
+        quit_button.setFont_(NSFont.systemFontOfSize_(12))
+        quit_button.setToolTip_("Завершить приложение и остановить захват звука")
+        content.addSubview_(quit_button)
         self._panel = panel
         self._placing = False
         return self
@@ -1255,11 +1260,11 @@ def main():
     })
 
     print(f"One audio-only Live session · REST audio buffer {preferences.audio_seconds}s · {PRIMARY_MODEL} → {FALLBACK_MODEL}")
-    print("TEST beta2 ⌥Q: Transcribe Live + IT vocabulary → Flash-Lite · dialog + multiple keys" if TRANSCRIPT_MODE else
+    print("v0.5.0 ⌥Q: Transcribe Live + IT vocabulary → Flash-Lite · dialog + multiple keys" if TRANSCRIPT_MODE else
           f"Audio-only: Live {LIVE_MODEL} · REST reserve {AUDIO_PRIMARY_MODEL} → {AUDIO_FALLBACK_MODEL}")
     print("⌥A files · ⌥Q audio only · ⌥Z screen hint · ⌥X text/code · Ctrl+C quit")
     controls.show()
-    overlay.show_text(("Тестовая v0.5.0-beta2: диалог + Flash-Lite.\n⌥Q помнит 6 последних вопросов; «Очистить» сбрасывает диалог.\n" if TRANSCRIPT_MODE else "Готов к работе.\n") + "\nВопрос по файлам — ⌥A (документы: «Файлы…»)\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nУ фоні працює одна голосова Live-сесія.\nЕкран надсилається лише кнопками ⌥Z / ⌥X / «Только экран».\nКнопка «Поток: пауза / пуск» зупиняє фонову передачу.\n\n"
+    overlay.show_text(("v0.5.0: диалог + Flash-Lite.\n⌥Q помнит 6 последних вопросов; «Очистить» сбрасывает диалог.\n" if TRANSCRIPT_MODE else "Готов к работе.\n") + "\nВопрос по файлам — ⌥A (документы: «Файлы…»)\nТолько звук — ⌥Q\nПодсказка — ⌥Z\nОтвет / код — ⌥X\nУ фоні працює одна голосова Live-сесія.\nЕкран надсилається лише кнопками ⌥Z / ⌥X / «Только экран».\nКнопка «Поток: пауза / пуск» зупиняє фонову передачу.\n\n"
                       "Окно можно перемещать за стандартный заголовок сверху.\n"
                       "Мониторы и длительность аудио выбираются в настройках.", reset_scroll=True)
     if not keys.entries():

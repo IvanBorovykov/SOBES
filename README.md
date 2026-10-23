@@ -1,14 +1,14 @@
 # Interview assistant
 
-Обычная версия: **v0.4.7**. Тестовая: **v0.5.0-beta2 — диалог и несколько ключей для ⌥Q**.
+Основная версия: **v0.5.0 — быстрый голосовой диалог и несколько API-ключей**.
 
-Тестовую версию запускает **Тестовая.command** (двойной щелчок) или `.venv/bin/python test_version.py`. В ней ⌥Q использует потоковое распознавание со словарём и Flash-Lite minimal. Сохраняются последние шесть вопросов/ответов, поэтому работают уточнения «добавь к нему…» и «чем заменить этот вызов». «Очистить» сбрасывает диалог. Распознанный вопрос виден над ответом; новая речь продолжает записываться.
+Запуск: **Запустить.command** (двойной щелчок) или `.venv/bin/python assistant.py`. ⌥Q использует потоковое распознавание со словарём и Flash-Lite minimal. Сохраняются последние шесть вопросов/ответов, поэтому работают уточнения «добавь к нему…» и «чем заменить этот вызов». «Очистить» сбрасывает диалог. Распознанный вопрос виден над ответом; новая речь продолжает записываться.
 
 При нескольких доступных ключах STT остаётся на своём соединении, а текстовые первичные попытки чередуются между остальными профилями. Если первых букв нет за 350 мс, запускается вторая попытка; её текст показывается только если она выиграла. После первых букв источник не меняется. Это **может расходовать вдвое больше текстовых запросов** и не обещает увеличения общей квоты: Google ограничивает проект, а не ключ. Отключение автосмены ключей оставляет только выбранный профиль.
 
 Финальные проверки: **8/8 правильных диалоговых ответов**, медиана первого текста **0,93 с**, диапазон **0,80–1,39 с**. Нативный захват воспроизводимой речи на Mac дал **0,89–0,99 с**. Beta1 без истории была быстрее по медиане (0,77 с), но дала только 5/8 конкретно правильных ответов. Тест не гарантирует скорость любого живого звонка. Все варианты и ограничения: [отчёт о диалоге и задержке](benchmarks/dialog_latency/REPORT.md).
 
-Обычный запуск `assistant.py` / `Запустить.command` сохраняет прежний режим; одновременно запускайте только одну версию. Файловый и экранный режимы используют свои модели. Если STT недоступен, используется PCM, сохранённый при нажатии, через Flash-Lite → 3 Flash Preview. Старый Live-ответ не подменяет текущий вопрос.
+`Тестовая.command` / `test_version.py` оставлены как совместимые способы запуска того же голосового режима; одновременно запускайте только один экземпляр. Файловый и экранный режимы используют свои модели. Если STT недоступен, используется PCM, сохранённый при нажатии, через Flash-Lite → 3 Flash Preview. Старый Live-ответ не подменяет текущий вопрос.
 
 Файловые тесты: [5 Python-модулей, 754 строки, вопросы преподавателя и шум](benchmarks/files_project/REPORT.md).
 Полный сравнительный тест: [45 API-идентификаторов из каталога 63 моделей](benchmarks/REPORT.md).
@@ -51,7 +51,7 @@ fallback model where available. Turn off the checkbox to use only the active key
 in the window once to keep it across launches without the environment variable.
 
 The floating toolbar provides **Вопрос по файлам**, **Файлы…**, **Только звук**, **Подсказка**, **Ответ / код**, **Только экран**,
-**Очистить**, **Пауза потока / Включить поток**, **↑ / ↓** and **Настройки…**. Keyboard shortcuts are written directly
+**Очистить**, **Пауза потока / Включить поток**, **↑ / ↓**, **Настройки…** and **Закрыть полностью**. Keyboard shortcuts are written directly
 on the buttons. Both the toolbar and answer window move by dragging their native
 macOS title bars. Positions are saved. The answer accepts mouse/trackpad scrolling.
 
@@ -66,7 +66,7 @@ Open **Настройки…** (or **⌘,** while the app is focused) to choose 
 Press **Применить** to save and apply changes without restarting. The toolbar always
 shows all three display choices, the selected audio duration and the input device.
 Settings also provide **↑ Выше**, **↓ Ниже** and **Сбросить положение** for the answer
-window. Quit using **Завершить** in settings, **⌘Q**, or **Ctrl+C** in the terminal.
+window. Quit using **Закрыть полностью** in the main window, **Завершить** in settings, **⌘Q**, or **Ctrl+C** in the terminal.
 
 Preferences are stored in `~/Library/Application Support/InterviewAssistant/settings.json`;
 no API key is stored there. An unplugged capture display blocks capture and is shown
@@ -76,7 +76,7 @@ windows are brought back to an available display.
 | Hotkey (two keys together) | Action |
 |---|---|
 | ⌥A (Option + A) | answer a spoken question using selected context files, without a screenshot |
-| ⌥Q (Option + Q) | reveal the latest continuously prepared audio-only hint |
+| ⌥Q (Option + Q) | finalize the spoken question and answer using the last six dialog turns |
 | ⌥X (Option + X) | detailed text/code answer from recent audio + selected screenshot |
 | ⌥Z (Option + Z) | short hint from a fresh screenshot + compressed recent audio, separate REST request |
 
@@ -120,12 +120,7 @@ Screenshots are now captured and sent **only on explicit screen requests** (⌥Z
 **Пауза потока** disconnects the voice session; **Включить поток** resumes with a
 fresh context. While paused, the hotkeys still explicitly send on-demand requests.
 
-Live uses **20 ms / 320-frame** PCM chunks, bounded to one second of queued audio.
-A slow/disconnected network discards that unsafe context and reconnects instead of
-accumulating delay. Server VAD uses **350 ms** of silence. A keypress during a quiet
-tail also queues `audio_stream_end` after the already captured PCM (hybrid VAD).
-If speech resumes, that flush is skipped. The local onset check invalidates stale
-text; it does not trim the Live audio.
+Системный захват выдаёт 20-мс фреймы PCM16 mono 16 кГц. Распознавание получает их пакетами по 100 мс, очередь ограничена шестью секундами. ⌥Q немедленно отправляет оставшийся хвост и фиксирует границу вопроса. Финальная расшифровка вместе с шестью предыдущими парами вопрос/ответ идёт в Flash-Lite minimal. Новая речь продолжает поступать и не прерывает показ ответа. «Очистить» отменяет текущий запрос и сбрасывает историю.
 
 For REST, the recent PCM is encoded **in memory as OGG/Opus, 24 kbps**, using
 ffmpeg's fastest complexity setting. Only digital silence at the edges is trimmed,
@@ -135,14 +130,13 @@ sent as WAV instead. Optional encoder installation: `brew install ffmpeg`.
 No audio files or transcripts are saved. The terminal reports input/sent duration,
 payload size and preparation time, without printing the conversation.
 
-If a Live answer was ready before the keypress, the overlay says so and reports
-time to display it. That is **not** model generation latency. Other answers report
-time from keypress to first text. See [LATENCY.md](LATENCY.md) for measurements.
+Время первого текста считается от нажатия ⌥Q; оно включает финализацию распознавания и ожидание первого текстового фрагмента. Замеры: [отчёт](benchmarks/dialog_latency/REPORT.md).
 
 Grant your terminal app **Microphone**, **Screen Recording** and **Accessibility** in
 System Settings → Privacy & Security, then restart the terminal.
 
 Optional env vars: `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_AUDIO_MODEL`, `GEMINI_AUDIO_FALLBACK_MODEL`, `GEMINI_FILES_MODEL`, `GEMINI_FILES_FALLBACK_MODEL`,
+`SOBES_AUDIO_PIPELINE` (`transcript` по умолчанию; `legacy` — прежняя Live-цепочка),
 `AUDIO_BUFFER_SECONDS` (1–60, default 30), `AUDIO_DEVICE` (input device name substring),
 `MONITOR` (display number shown in settings, default 1). Explicit audio/monitor
 environment variables override the corresponding saved choice on startup. Use the
@@ -154,34 +148,11 @@ Less audio can reduce upload and processing time, but can cut off the question.
 It does not make model latency proportionally faster. The app already has the audio
 in memory, so choosing 30 seconds does **not** mean waiting 30 seconds after clicking.
 Up to 60 seconds are kept locally in RAM. The selected recent duration applies
-to ⌥Z, ⌥X and on-demand fallback; continuous Live hints receive audio as it arrives
+to ⌥Z, ⌥X and on-demand fallback; streaming transcription receives audio as it arrives
 instead of replaying that buffer. Increasing the duration can use audio already
 retained since launch.
 
-Для **⌥Q** проверена отдельная резервная цепочка: `gemini-2.5-flash` с thinking budget 0 → `gemini-3-flash-preview` с minimal thinking. Аудио сохраняется перед ожиданием Live, чтобы не потерять начало вопроса. Готовый Live-ответ показывается сразу; если первых слов нет за 350 мс, запускается REST. Это ограничение касается только начала ответа, не его продолжения. Тайм-аут отдельного голосового REST-вызова — 10 с; до появления текста можно перейти на резерв, после первых слов повторной отправки нет. Общее ожидание может включать Live и несколько попыток. Экранные режимы и вопросы по файлам используют прежние модели. Сравнение и ограничения: [benchmarks/REPORT.md](benchmarks/REPORT.md).
-
-Fast hints default to `gemini-3.1-flash-live-preview` with
-`thinking_level="minimal"`, based on the local synthetic latency probes in
-[LATENCY.md](LATENCY.md). Set `GEMINI_LIVE_MODEL=gemini-3.8-live` to use the prior
-model; Google requires omitting `thinking_level` for 3.8 Live, and the app does so.
-Gemini 2.5 uses `thinking_budget=0`.
-These options are model-specific ([Google documentation](https://ai.google.dev/gemini-api/docs/live-api/capabilities)).
-
-The voice hint shows output audio transcription without playing audio. Live uses
-`activity_handling=NO_INTERRUPTION`: new speech/noise does not cancel an answer
-already being generated. The local speech detector also preserves that answer
-until `turn_complete`. The final text is retained for an active viewer across the
-next question boundary. Explicit **Очистить**, **Пауза потока** or a new request
-still cancel/change the visible operation. Unexpected server/network failures are
-reported with already displayed text preserved. Background
-disconnects, expired sessions and quota errors reconnect using eligible keys;
-permission failures remain scoped to the model. The continuous path waits at most
-0.8 seconds for an idle stream with no text, or 2.5 seconds for a known in-flight
-question. A failed/not-ready/paused voice session falls back to compressed-audio
-REST **without opening another Live connection**. No request is replayed after
-text has been shown. Audio-only fallbacks never capture the screen. **Очистить**
-cancels the visible request, clears the ring buffer and restarts the voice context
-if continuous mode is enabled.
+Основной ⌥Q использует `gemini-3.5-transcribe-live` → `gemini-3.5-flash-lite` minimal. При сбое распознавания отправляется сжатое аудио, зафиксированное при нажатии, в Flash-Lite minimal → `gemini-3-flash-preview` minimal. Тайм-аут голосового REST-вызова — 10 с. После появления текста ответ не переотправляется. Экранные запросы и вопросы по файлам используют свои модели. Прежний режим доступен через `SOBES_AUDIO_PIPELINE=legacy .venv/bin/python assistant.py`; его старые замеры описаны в [LATENCY.md](LATENCY.md).
 
 Text/code defaults: `gemini-3.5-flash-lite` with minimal thinking, falling back to
 `gemini-3.8-flash` with low thinking when available keys are exhausted by rate limits, or on

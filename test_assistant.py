@@ -417,12 +417,12 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(contents[0].inline_data.data, self.payload.data)
         self.assertIn("Fallback", self.shown()[-1])
 
-    def test_audio_fallback_uses_benchmarked_model_without_thinking(self):
+    def test_audio_fallback_uses_flash_lite_with_minimal_thinking(self):
         self.generate.return_value = (SimpleNamespace(text="Answer") for _ in range(1))
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         request = self.generate.call_args.kwargs
-        self.assertEqual(request["model"], "gemini-2.5-flash")
-        self.assertEqual(request["config"].thinking_config.thinking_budget, 0)
+        self.assertEqual(request["model"], "gemini-3.5-flash-lite")
+        self.assertEqual(request["config"].thinking_config.thinking_level, "MINIMAL")
         self.assertEqual(request["config"].http_options.timeout, 10_000)
 
     def test_audio_fallback_keeps_question_captured_before_waiting_for_live(self):
@@ -442,7 +442,7 @@ class AssistantTests(unittest.TestCase):
                                      (SimpleNamespace(text="Reserve answer") for _ in range(1))]
         self.app._run_live(0, time.perf_counter(), audio_only=True)
         self.assertEqual([call.kwargs["model"] for call in self.generate.call_args_list],
-                         ["gemini-2.5-flash", "gemini-3-flash-preview"])
+                         ["gemini-3.5-flash-lite", "gemini-3-flash-preview"])
         self.assertEqual(self.generate.call_args.kwargs["config"].thinking_config.thinking_level, "MINIMAL")
         self.assertIn("✓ Завершено", self.shown()[-1])
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Beta2: streaming STT, short dialog history and multiple-key Flash-Lite Q."""
+"""Compatibility launcher for the standard streaming-STT and Flash-Lite dialog."""
 import os
 
 if __name__ == '__main__':
