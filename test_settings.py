@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from AppKit import NSMakeRect
+from Foundation import NSDate, NSObject, NSRunLoop
 from PIL import Image
 
 import assistant
@@ -60,6 +61,32 @@ class Panel:
 
     def setFrameOrigin_(self, point):
         self.rectangle.origin = point
+
+
+class WindowDraggingTests(unittest.TestCase):
+    def test_title_bar_hands_drag_to_window_server(self):
+        panel = SimpleNamespace(
+            contentView=lambda: SimpleNamespace(bounds=lambda: NSMakeRect(0, 0, 620, 334)),
+            performWindowDragWithEvent_=Mock(),
+        )
+        event = SimpleNamespace(type=lambda: assistant.NSEventTypeLeftMouseDown,
+                                locationInWindow=lambda: SimpleNamespace(y=345))
+        assistant.DraggablePanel.sendEvent_.callable(panel, event)
+        panel.performWindowDragWithEvent_.assert_called_once_with(event)
+
+    def test_move_burst_remembers_only_latest_position_after_settling(self):
+        callback = Mock()
+        observer = assistant.WindowObserver.alloc().initWithCallback_(callback)
+        self.addCleanup(NSObject.cancelPreviousPerformRequestsWithTarget_, observer)
+        panel = SimpleNamespace(position=0)
+        notification = SimpleNamespace(object=lambda: panel)
+        for position in range(50):
+            panel.position = position
+            observer.windowDidMove_(notification)
+        callback.assert_not_called()
+        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.45))
+        callback.assert_called_once_with(panel)
+        self.assertEqual(callback.call_args.args[0].position, 49)
 
 
 class DisplaySettingsTests(unittest.TestCase):

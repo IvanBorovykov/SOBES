@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import zipfile
@@ -32,6 +33,25 @@ class FileContextTests(unittest.TestCase):
         path.unlink()
         with self.assertRaises(OSError):
             self.context.load([str(path)])
+
+    def test_editor_line_numbers_preserve_blank_lines_and_unicode_in_code(self):
+        path = self.root / 'service.py'
+        lines = ['# header', '', '   ', 'label = "a\u2028b\u0085c"'] + [''] * 50 + ['answer = 42', '']
+        for separator in ('\n', '\r\n', '\r'):
+            with self.subTest(separator=repr(separator)):
+                path.write_bytes(('\ufeff' + separator.join(lines)).encode('utf-8'))
+                payload, _ = self.context.load([str(path)])
+                content = json.loads(payload)[0]['content']
+                self.assertEqual(content, [{'line': i, 'text': line} for i, line in enumerate(lines, 1)])
+                self.assertEqual(content[54], {'line': 55, 'text': 'answer = 42'})
+
+    def test_saved_edit_updates_code_and_line_numbers_on_next_request(self):
+        path = self.root / 'service.py'
+        path.write_text('old = 1\nanswer = 42\n')
+        self.context.load([str(path)])
+        path.write_text('# inserted\n\nold = 1\nanswer = 43\n')
+        payload, _ = self.context.load([str(path)])
+        self.assertEqual(json.loads(payload)[0]['content'][3], {'line': 4, 'text': 'answer = 43'})
 
     def test_cached_file_is_not_extracted_twice(self):
         path = self.root / 'guide.txt'

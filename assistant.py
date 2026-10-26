@@ -41,8 +41,6 @@ from AppKit import (
     NSForegroundColorAttributeName,
     NSFloatingWindowLevel,
     NSEventTypeLeftMouseDown,
-    NSEventTypeLeftMouseDragged,
-    NSEventTypeLeftMouseUp,
     NSPanel,
     NSMenu,
     NSMenuItem,
@@ -327,20 +325,11 @@ def capture_screenshot(display_id=None, fast=False):
 # --- Overlay ------------------------------------------------------------------
 
 class DraggablePanel(NSPanel):
-    """Track title-bar dragging directly, including on accessory app panels."""
+    """Let the Window Server move accessory panels without Python frame updates."""
 
     def sendEvent_(self, event):
-        kind = event.type()
-        if kind == NSEventTypeLeftMouseDown and event.locationInWindow().y >= self.contentView().bounds().size.height:
-            self._drag_offset = event.locationInWindow()
-            return
-        offset = getattr(self, "_drag_offset", None)
-        if offset is not None and kind == NSEventTypeLeftMouseDragged:
-            point = self.convertPointToScreen_(event.locationInWindow())
-            self.setFrameOrigin_(NSMakePoint(point.x - offset.x, point.y - offset.y))
-            return
-        if offset is not None and kind == NSEventTypeLeftMouseUp:
-            self._drag_offset = None
+        if event.type() == NSEventTypeLeftMouseDown and event.locationInWindow().y >= self.contentView().bounds().size.height:
+            self.performWindowDragWithEvent_(event)
             return
         objc.super(DraggablePanel, self).sendEvent_(event)
 
@@ -568,7 +557,12 @@ class WindowObserver(NSObject):
         return self
 
     def windowDidMove_(self, notification):
-        self._callback(notification.object())
+        NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(self, "rememberWindow:", None)
+        self._window = notification.object()
+        self.performSelector_withObject_afterDelay_("rememberWindow:", None, 0.3)
+
+    def rememberWindow_(self, sender):
+        self._callback(self._window)
 
 
 class Controls(NSObject):
@@ -944,8 +938,11 @@ class Assistant:
             prompt = USER_PROMPT if audio else "Зображення — поточний екран. Аудіо не додано."
         if context_text is not None:
             prompt = ("В аудіо — останній фрагмент розмови. Визнач останнє запитання та відповідай за документами. "
-                      "Цитуй джерела як [F1, стор. 2] або [F2, рядок 10]. Не вигадуй посилань чи фактів. "
+                      "Цитуй джерела як [F1: guide.pdf, стор. 2] або [F2: service.py, рядок 55]. Не вигадуй посилань чи фактів. "
                       "Якщо джерело має поля line, цитуй лише рядки; якщо page — сторінки. "
+                      "Поле line — точний номер рядка збереженого файлу, починаючи з 1, як у VS Code. "
+                      "Порожні рядки теж враховані. Не перенумеровуй рядки та не рахуй їх за JSON. "
+                      "Цитуй номер із поля line біля відповідного коду та перевір, що текст на ньому підтверджує відповідь. "
                       "Не додавай сторінки до Python та інших текстових файлів. "
                       "Якщо відповіді в документах немає, прямо скажи про це. "
                       "Для питань про функції перевір визначення, імпорти та всі виклики в усіх файлах. "
@@ -1274,6 +1271,8 @@ def main():
     try:
         AppHelper.runEventLoop(installInterrupt=True)
     finally:
+        for kind, panel in (("overlay", overlay._panel), ("controls", controls._panel)):
+            controls.remember_window(kind, panel)
         audio.close()
         assistant.close()
 

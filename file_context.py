@@ -1,6 +1,7 @@
 """Explicit user-selected document text for voice questions. No directory crawling."""
 
 import json
+import os
 import threading
 import zipfile
 from pathlib import Path
@@ -11,6 +12,28 @@ TEXT_TYPES = {'.txt', '.md', '.csv', '.json', '.yaml', '.yml', '.py', '.js', '.t
 SUPPORTED_TYPES = TEXT_TYPES | {'.pdf', '.docx'}
 MAX_FILES = 20
 MAX_CHARS = 300_000
+
+
+def folder_paths(directory):
+    """List candidates for explicit selection; never follow links or scan dependencies."""
+    result = []
+    visited = 0
+
+    def fail(error):
+        raise error
+
+    for parent, directories, files in os.walk(directory, onerror=fail, followlinks=False):
+        visited += len(directories) + len(files)
+        if visited > 5000:
+            raise ValueError('Папка слишком большая для выбора. Выберите конкретную подпапку или отдельные файлы.')
+        directories[:] = sorted(name for name in directories
+                                if not name.startswith('.') and name not in {'node_modules', '__pycache__', 'venv'}
+                                and not (Path(parent) / name).is_symlink())
+        for name in sorted(files):
+            path = Path(parent) / name
+            if not name.startswith('.') and path.suffix.lower() in SUPPORTED_TYPES and not path.is_symlink():
+                result.append(str(path))
+    return result
 
 
 def validate_paths(paths):
@@ -111,7 +134,11 @@ class FileContext:
     def _lines(text):
         if len(text) > MAX_CHARS:
             raise ValueError('Слишком много текста в одном файле. Выберите меньший фрагмент.')
-        return [{'line': index, 'text': line} for index, line in enumerate(text.splitlines(), 1) if line.strip()]
+        if not text.strip():
+            return []
+        # Match editor lines: CRLF/CR/LF only; Unicode separators belong to the code.
+        lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+        return [{'line': index, 'text': line} for index, line in enumerate(lines, 1)]
 
     def load(self, paths):
         if not paths:
