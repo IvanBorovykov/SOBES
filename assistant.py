@@ -21,57 +21,67 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 
+if sys.platform == 'win32':
+    for output in (sys.stdout, sys.stderr):
+        if hasattr(output, 'reconfigure'):
+            output.reconfigure(encoding='utf-8', errors='backslashreplace')
+
 import mss
-import objc
-import pyaudio
-import Quartz
-from AppKit import (
-    NSApplication,
-    NSApplicationActivationPolicyAccessory,
-    NSApplicationDidChangeScreenParametersNotification,
-    NSAlert,
-    NSAppearance,
-    NSAppearanceNameDarkAqua,
-    NSAttributedString,
-    NSBackingStoreBuffered,
-    NSColor,
-    NSButton,
-    NSFont,
-    NSFontAttributeName,
-    NSForegroundColorAttributeName,
-    NSFloatingWindowLevel,
-    NSEventTypeLeftMouseDown,
-    NSPanel,
-    NSMenu,
-    NSMenuItem,
-    NSPopUpButton,
-    NSScreen,
-    NSTextView,
-    NSTextField,
-    NSViewHeightSizable,
-    NSViewWidthSizable,
-    NSWindowCollectionBehaviorCanJoinAllSpaces,
-    NSWindowCollectionBehaviorFullScreenAuxiliary,
-    NSWindowCollectionBehaviorIgnoresCycle,
-    NSWindowSharingNone,
-    NSWindowStyleMaskClosable,
-    NSWindowStyleMaskTitled,
-)
-from Foundation import NSObject, NSMakePoint, NSMakeRect, NSMakeRange, NSMakeSize, NSNotificationCenter
+if sys.platform == 'darwin':
+    import objc
+    import Quartz
+    from AppKit import (
+        NSApplication,
+        NSApplicationActivationPolicyAccessory,
+        NSApplicationDidChangeScreenParametersNotification,
+        NSAlert,
+        NSAppearance,
+        NSAppearanceNameDarkAqua,
+        NSAttributedString,
+        NSBackingStoreBuffered,
+        NSColor,
+        NSButton,
+        NSFont,
+        NSFontAttributeName,
+        NSForegroundColorAttributeName,
+        NSFloatingWindowLevel,
+        NSEventTypeLeftMouseDown,
+        NSPanel,
+        NSMenu,
+        NSMenuItem,
+        NSPopUpButton,
+        NSScreen,
+        NSTextView,
+        NSTextField,
+        NSViewHeightSizable,
+        NSViewWidthSizable,
+        NSWindowCollectionBehaviorCanJoinAllSpaces,
+        NSWindowCollectionBehaviorFullScreenAuxiliary,
+        NSWindowCollectionBehaviorIgnoresCycle,
+        NSWindowSharingNone,
+        NSWindowStyleMaskClosable,
+        NSWindowStyleMaskTitled,
+    )
+    from Foundation import NSObject, NSMakePoint, NSMakeRect, NSMakeRange, NSMakeSize, NSNotificationCenter
+    from PyObjCTools import AppHelper
+else:
+    from windows_platform import AppHelper
+
+if sys.platform == 'win32':
+    import pyaudiowpatch as pyaudio
+else:
+    import pyaudio
+
 from google.genai import errors, types
 from httpx import TimeoutException
 from PIL import Image
-from PyObjCTools import AppHelper
-
 from realtime_hints import RealtimeHints
 from audio_payload import prepare_audio
 from system_audio import SystemAudio
 from live_transcription import LiveTranscription
 from answer_stream import first_answer
 from file_context import FileContext
-from file_context_ui import FileContextPanel
 from api_keys import KeychainError, KeychainStore, KeyPool, credential_error
-from api_keys_ui import ApiKeysPanel
 from preferences import MAX_AUDIO_SECONDS, Preferences
 
 # --- Config -----------------------------------------------------------------
@@ -124,14 +134,15 @@ OVERLAY_WIDTH = 560
 OVERLAY_HEIGHT_RATIO = 0.7
 SCROLL_STEP = 120
 
-KEY_X, KEY_Z, KEY_Q, KEY_A = 7, 6, 12, 0
-MODIFIER_MASK = (
-    Quartz.kCGEventFlagMaskCommand
-    | Quartz.kCGEventFlagMaskShift
-    | Quartz.kCGEventFlagMaskControl
-    | Quartz.kCGEventFlagMaskAlternate
-)
-HOTKEY_MODIFIERS = Quartz.kCGEventFlagMaskAlternate
+if sys.platform == 'darwin':
+    KEY_X, KEY_Z, KEY_Q, KEY_A = 7, 6, 12, 0
+    MODIFIER_MASK = (
+        Quartz.kCGEventFlagMaskCommand
+        | Quartz.kCGEventFlagMaskShift
+        | Quartz.kCGEventFlagMaskControl
+        | Quartz.kCGEventFlagMaskAlternate
+    )
+    HOTKEY_MODIFIERS = Quartz.kCGEventFlagMaskAlternate
 
 
 # --- Audio ring buffer --------------------------------------------------------
@@ -173,10 +184,14 @@ class AudioRing:
         self.error = ""
         if source == "system":
             self.device_name = "Звук компьютера — звонки / видео"
-            self.error = "Подключаю звук компьютера… Проверьте запрос разрешения macOS."
+            self.error = "Подключаю звук компьютера…"
             self._system = SystemAudio(lambda data: self._on_audio(data, 320, None, 0), self._source_error, self._source_ready)
         else:
-            self._start_microphone()
+            try:
+                self._start_microphone()
+            except (OSError, ValueError) as error:
+                self.close()
+                self._source_error(str(error))
 
     def _source_error(self, message):
         self.error = message
@@ -211,7 +226,7 @@ class AudioRing:
                 self.device_name = info["name"]
                 print(f"Audio input: {info['name']}")
                 return i
-        sys.exit(f"No audio input device matching {AUDIO_DEVICE!r}")
+        raise ValueError(f"No audio input device matching {AUDIO_DEVICE!r}")
 
     def _on_audio(self, data, frame_count, time_info, status):
         with self._lock:
@@ -264,547 +279,555 @@ class AudioRing:
 
 # --- Screenshot ---------------------------------------------------------------
 
-def get_displays():
-    displays = []
-    for index, screen in enumerate(NSScreen.screens()):
-        display_id = int(screen.deviceDescription()["NSScreenNumber"])
-        serial = Quartz.CGDisplaySerialNumber(display_id)
-        key = f"{Quartz.CGDisplayVendorNumber(display_id)}:{Quartz.CGDisplayModelNumber(display_id)}:{serial}"
-        if not serial:
-            key += f":{display_id}"
-        name = str(screen.localizedName())
-        width, height = Quartz.CGDisplayPixelsWide(display_id), Quartz.CGDisplayPixelsHigh(display_id)
-        displays.append({
-            "id": display_id, "key": key, "name": name, "screen": screen,
-            "title": f"{index + 1}. {name} — {width} × {height}",
-        })
-    return displays
+if sys.platform == 'darwin':
+    from file_context_ui import FileContextPanel
+    from api_keys_ui import ApiKeysPanel
+
+    def get_displays():
+        displays = []
+        for index, screen in enumerate(NSScreen.screens()):
+            display_id = int(screen.deviceDescription()["NSScreenNumber"])
+            serial = Quartz.CGDisplaySerialNumber(display_id)
+            key = f"{Quartz.CGDisplayVendorNumber(display_id)}:{Quartz.CGDisplayModelNumber(display_id)}:{serial}"
+            if not serial:
+                key += f":{display_id}"
+            name = str(screen.localizedName())
+            width, height = Quartz.CGDisplayPixelsWide(display_id), Quartz.CGDisplayPixelsHigh(display_id)
+            displays.append({
+                "id": display_id, "key": key, "name": name, "screen": screen,
+                "title": f"{index + 1}. {name} — {width} × {height}",
+            })
+        return displays
 
 
-def capture_screenshot(display_id=None, fast=False):
-    if display_id is None:
-        display_id = Quartz.CGMainDisplayID()
-    if display_id < 0 or not Quartz.CGDisplayIsActive(display_id):
-        raise ValueError("Экран для анализа отключён. Выберите экран в настройках.")
-    bounds = Quartz.CGDisplayBounds(display_id)
-    region = {"left": int(bounds.origin.x), "top": int(bounds.origin.y),
-              "width": int(bounds.size.width), "height": int(bounds.size.height)}
-    try:
-        with mss.mss() as sct:
-            shot = sct.grab(region)
-            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-    except Exception:
-        # mss relies on CGWindowListCreateImage, which newer macOS versions may refuse.
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "screen.png")
-            rectangle = ",".join(str(region[key]) for key in ("left", "top", "width", "height"))
-            subprocess.run(["screencapture", "-x", f"-R{rectangle}", path], check=True,
-                           timeout=3 if fast else 15)
-            img = Image.open(path).convert("RGB")
+    def capture_screenshot(display_id=None, fast=False):
+        if display_id is None:
+            display_id = Quartz.CGMainDisplayID()
+        if display_id < 0 or not Quartz.CGDisplayIsActive(display_id):
+            raise ValueError("Экран для анализа отключён. Выберите экран в настройках.")
+        bounds = Quartz.CGDisplayBounds(display_id)
+        region = {"left": int(bounds.origin.x), "top": int(bounds.origin.y),
+                  "width": int(bounds.size.width), "height": int(bounds.size.height)}
+        try:
+            with mss.mss() as sct:
+                shot = sct.grab(region)
+                img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        except Exception:
+            # mss relies on CGWindowListCreateImage, which newer macOS versions may refuse.
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "screen.png")
+                rectangle = ",".join(str(region[key]) for key in ("left", "top", "width", "height"))
+                subprocess.run(["screencapture", "-x", f"-R{rectangle}", path], check=True,
+                               timeout=3 if fast else 15)
+                img = Image.open(path).convert("RGB")
 
-    if fast:
-        factor = max(1, img.width // MAX_SCREENSHOT_WIDTH)
-        if factor > 1:
-            img = img.reduce(factor)
-        img.thumbnail((MAX_SCREENSHOT_WIDTH, MAX_SCREENSHOT_WIDTH), Image.Resampling.BILINEAR)
-    elif img.width > MAX_SCREENSHOT_WIDTH:
-        img = img.resize(
-            (MAX_SCREENSHOT_WIDTH, round(img.height * MAX_SCREENSHOT_WIDTH / img.width)),
-            Image.Resampling.LANCZOS,
-        )
-    while True:
-        out = io.BytesIO()
-        img.save(out, "JPEG", quality=60 if fast else JPEG_QUALITY, optimize=not fast)
-        result = out.getvalue()
-        if not fast or len(result) <= 100_000 or img.width <= 320:
-            return result
-        img = img.resize((max(1, img.width * 4 // 5), max(1, img.height * 4 // 5)),
-                         Image.Resampling.BILINEAR)
-
-
-# --- Overlay ------------------------------------------------------------------
-
-class DraggablePanel(NSPanel):
-    """Let the Window Server move accessory panels without Python frame updates."""
-
-    def sendEvent_(self, event):
-        if event.type() == NSEventTypeLeftMouseDown and event.locationInWindow().y >= self.contentView().bounds().size.height:
-            self.performWindowDragWithEvent_(event)
-            return
-        objc.super(DraggablePanel, self).sendEvent_(event)
+        if fast:
+            factor = max(1, img.width // MAX_SCREENSHOT_WIDTH)
+            if factor > 1:
+                img = img.reduce(factor)
+            img.thumbnail((MAX_SCREENSHOT_WIDTH, MAX_SCREENSHOT_WIDTH), Image.Resampling.BILINEAR)
+        elif img.width > MAX_SCREENSHOT_WIDTH:
+            img = img.resize(
+                (MAX_SCREENSHOT_WIDTH, round(img.height * MAX_SCREENSHOT_WIDTH / img.width)),
+                Image.Resampling.LANCZOS,
+            )
+        while True:
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=60 if fast else JPEG_QUALITY, optimize=not fast)
+            result = out.getvalue()
+            if not fast or len(result) <= 100_000 or img.width <= 320:
+                return result
+            img = img.resize((max(1, img.width * 4 // 5), max(1, img.height * 4 // 5)),
+                             Image.Resampling.BILINEAR)
 
 
-class Overlay:
-    """Floating answer panel with the standard macOS draggable title bar."""
+    # --- Overlay ------------------------------------------------------------------
 
-    def __init__(self):
-        visible = NSScreen.mainScreen().visibleFrame()
-        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 400))
-        frame = NSMakeRect(
-            visible.origin.x + visible.size.width - OVERLAY_WIDTH - 20,
-            visible.origin.y + (visible.size.height - height) / 2,
-            OVERLAY_WIDTH,
-            height,
-        )
+    class DraggablePanel(NSPanel):
+        """Let the Window Server move accessory panels without Python frame updates."""
 
-        panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            frame,
-            NSWindowStyleMaskTitled,
-            NSBackingStoreBuffered,
-            False,
-        )
-        panel.setSharingType_(NSWindowSharingNone)
-        panel.setTitle_("Подсказка — перетащите окно за этот заголовок")
-        panel.setMovable_(True)
-        panel.setMovableByWindowBackground_(True)
-        panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
-        panel.setIgnoresMouseEvents_(False)
-        panel.setLevel_(NSFloatingWindowLevel)
-        panel.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorFullScreenAuxiliary
-            | NSWindowCollectionBehaviorIgnoresCycle
-        )
-        panel.setHidesOnDeactivate_(False)
-        panel.setOpaque_(False)
-        panel.setHasShadow_(False)
-        panel.setBackgroundColor_(NSColor.clearColor())
+        def sendEvent_(self, event):
+            if event.type() == NSEventTypeLeftMouseDown and event.locationInWindow().y >= self.contentView().bounds().size.height:
+                self.performWindowDragWithEvent_(event)
+                return
+            objc.super(DraggablePanel, self).sendEvent_(event)
 
-        content = panel.contentView()
-        content.setWantsLayer_(True)
-        content.layer().setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.06, 0.82).CGColor())
-        content.layer().setCornerRadius_(12)
 
-        scroll = NSTextView.scrollableTextView()
-        scroll.setFrame_(NSMakeRect(14, 12, OVERLAY_WIDTH - 28, height - 24))
-        scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        scroll.setDrawsBackground_(False)
-        scroll.setHasVerticalScroller_(False)
-        text = scroll.documentView()
-        text.setEditable_(False)
-        text.setSelectable_(False)
-        text.setDrawsBackground_(False)
-        content.addSubview_(scroll)
+    class Overlay:
+        """Floating answer panel with the standard macOS draggable title bar."""
 
-        self._panel = panel
-        self._scroll = scroll
-        self._text = text
-        self._attrs = {
-            NSFontAttributeName: NSFont.fontWithName_size_("Menlo", 13),
-            NSForegroundColorAttributeName: NSColor.colorWithCalibratedWhite_alpha_(0.95, 1.0),
-        }
-        self._follow = False
+        def __init__(self):
+            visible = NSScreen.mainScreen().visibleFrame()
+            height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 400))
+            frame = NSMakeRect(
+                visible.origin.x + visible.size.width - OVERLAY_WIDTH - 20,
+                visible.origin.y + (visible.size.height - height) / 2,
+                OVERLAY_WIDTH,
+                height,
+            )
 
-    def show_text(self, text, reset_scroll=False):
-        if reset_scroll:
+            panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                frame,
+                NSWindowStyleMaskTitled,
+                NSBackingStoreBuffered,
+                False,
+            )
+            panel.setSharingType_(NSWindowSharingNone)
+            panel.setTitle_("Подсказка — перетащите окно за этот заголовок")
+            panel.setMovable_(True)
+            panel.setMovableByWindowBackground_(True)
+            panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
+            panel.setIgnoresMouseEvents_(False)
+            panel.setLevel_(NSFloatingWindowLevel)
+            panel.setCollectionBehavior_(
+                NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehaviorIgnoresCycle
+            )
+            panel.setHidesOnDeactivate_(False)
+            panel.setOpaque_(False)
+            panel.setHasShadow_(False)
+            panel.setBackgroundColor_(NSColor.clearColor())
+
+            content = panel.contentView()
+            content.setWantsLayer_(True)
+            content.layer().setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.06, 0.82).CGColor())
+            content.layer().setCornerRadius_(12)
+
+            scroll = NSTextView.scrollableTextView()
+            scroll.setFrame_(NSMakeRect(14, 12, OVERLAY_WIDTH - 28, height - 24))
+            scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+            scroll.setDrawsBackground_(False)
+            scroll.setHasVerticalScroller_(False)
+            text = scroll.documentView()
+            text.setEditable_(False)
+            text.setSelectable_(False)
+            text.setDrawsBackground_(False)
+            content.addSubview_(scroll)
+
+            self._panel = panel
+            self._scroll = scroll
+            self._text = text
+            self._attrs = {
+                NSFontAttributeName: NSFont.fontWithName_size_("Menlo", 13),
+                NSForegroundColorAttributeName: NSColor.colorWithCalibratedWhite_alpha_(0.95, 1.0),
+            }
             self._follow = False
-        storage = self._text.textStorage()
-        storage.setAttributedString_(NSAttributedString.alloc().initWithString_attributes_(text, self._attrs))
-        if reset_scroll:
-            self._text.scrollRangeToVisible_(NSMakeRange(0, 0))
-        elif self._follow:
-            self._text.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
-        self._panel.orderFrontRegardless()
 
-    def hide(self):
-        self._panel.orderOut_(None)
-        self._text.setString_("")
+        def show_text(self, text, reset_scroll=False):
+            if reset_scroll:
+                self._follow = False
+            storage = self._text.textStorage()
+            storage.setAttributedString_(NSAttributedString.alloc().initWithString_attributes_(text, self._attrs))
+            if reset_scroll:
+                self._text.scrollRangeToVisible_(NSMakeRange(0, 0))
+            elif self._follow:
+                self._text.scrollRangeToVisible_(NSMakeRange(storage.length(), 0))
+            self._panel.orderFrontRegardless()
 
-    def scroll(self, delta):
-        clip = self._scroll.contentView()
-        max_y = max(0, self._text.frame().size.height - clip.bounds().size.height)
-        y = min(max(clip.bounds().origin.y + delta, 0), max_y)
-        self._follow = delta > 0 and y >= max_y
-        clip.scrollToPoint_(NSMakePoint(0, y))
-        self._scroll.reflectScrolledClipView_(clip)
+        def hide(self):
+            self._panel.orderOut_(None)
+            self._text.setString_("")
+
+        def scroll(self, delta):
+            clip = self._scroll.contentView()
+            max_y = max(0, self._text.frame().size.height - clip.bounds().size.height)
+            y = min(max(clip.bounds().origin.y + delta, 0), max_y)
+            self._follow = delta > 0 and y >= max_y
+            clip.scrollToPoint_(NSMakePoint(0, y))
+            self._scroll.reflectScrolledClipView_(clip)
 
 
-# --- Controls -----------------------------------------------------------------
+    # --- Controls -----------------------------------------------------------------
 
-class SettingsPanel(NSObject):
-    def initWithApply_move_(self, apply, move):
-        self = objc.super(SettingsPanel, self).init()
-        if self is None:
-            return None
-        self._apply = apply
-        self._move = move
-        self._panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100, 100, 640, 554), NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
-            NSBackingStoreBuffered, False,
-        )
-        self._panel.setTitle_("Настройки помощника")
-        self._panel.setReleasedWhenClosed_(False)
-        self._panel.setLevel_(NSFloatingWindowLevel + 1)
-        self._panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
-        self._panel.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces
-                                          | NSWindowCollectionBehaviorFullScreenAuxiliary)
-        content = self._panel.contentView()
-        self._popups = {}
-        for name, title, y in (
-            ("audio_source", "Что слушать — микрофон или собеседника в звонке", 514),
-            ("overlay_display", "Где показывать подсказку", 440),
-            ("controls_display", "Где показывать панель с кнопками", 366),
-            ("capture_display", "Какой экран отправлять модели", 292),
-            ("audio_seconds", "Сколько последних секунд аудио отправлять", 218),
-        ):
-            label = NSTextField.labelWithString_(title)
-            label.setFrame_(NSMakeRect(20, y, 600, 20))
+    class SettingsPanel(NSObject):
+        def initWithApply_move_(self, apply, move):
+            self = objc.super(SettingsPanel, self).init()
+            if self is None:
+                return None
+            self._apply = apply
+            self._move = move
+            self._panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                NSMakeRect(100, 100, 640, 554), NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
+                NSBackingStoreBuffered, False,
+            )
+            self._panel.setTitle_("Настройки помощника")
+            self._panel.setReleasedWhenClosed_(False)
+            self._panel.setLevel_(NSFloatingWindowLevel + 1)
+            self._panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
+            self._panel.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces
+                                              | NSWindowCollectionBehaviorFullScreenAuxiliary)
+            content = self._panel.contentView()
+            self._popups = {}
+            for name, title, y in (
+                ("audio_source", "Что слушать — микрофон или собеседника в звонке", 514),
+                ("overlay_display", "Где показывать подсказку", 440),
+                ("controls_display", "Где показывать панель с кнопками", 366),
+                ("capture_display", "Какой экран отправлять модели", 292),
+                ("audio_seconds", "Сколько последних секунд аудио отправлять", 218),
+            ):
+                label = NSTextField.labelWithString_(title)
+                label.setFrame_(NSMakeRect(20, y, 600, 20))
+                content.addSubview_(label)
+                popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(18, y - 33, 604, 28), False)
+                popup.setAccessibilityLabel_(title)
+                content.addSubview_(popup)
+                self._popups[name] = popup
+            label = NSTextField.labelWithString_("Переместить текущее окно подсказки")
+            label.setFrame_(NSMakeRect(20, 150, 600, 20))
             content.addSubview_(label)
-            popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(18, y - 33, 604, 28), False)
-            popup.setAccessibilityLabel_(title)
-            content.addSubview_(popup)
-            self._popups[name] = popup
-        label = NSTextField.labelWithString_("Переместить текущее окно подсказки")
-        label.setFrame_(NSMakeRect(20, 150, 600, 20))
-        content.addSubview_(label)
-        for title, action, x, width in (
-            ("↑ Выше", "moveUp:", 18, 130), ("↓ Ниже", "moveDown:", 154, 130),
-            ("Сбросить положение", "resetPosition:", 290, 218),
-        ):
-            button = NSButton.buttonWithTitle_target_action_(title, self, action)
-            button.setFrame_(NSMakeRect(x, 112, width, 30))
-            content.addSubview_(button)
-        self._info = NSTextField.wrappingLabelWithString_("")
-        self._info.setFont_(NSFont.systemFontOfSize_(11))
-        self._info.setTextColor_(NSColor.secondaryLabelColor())
-        self._info.setFrame_(NSMakeRect(20, 54, 600, 48))
-        content.addSubview_(self._info)
-        for title, action, x in (("Отмена", "cancel:", 392), ("Применить", "apply:", 506)):
-            button = NSButton.buttonWithTitle_target_action_(title, self, action)
-            button.setFrame_(NSMakeRect(x, 14, 114, 30))
-            content.addSubview_(button)
-        quit_button = NSButton.buttonWithTitle_target_action_("Завершить", self, "quit:")
-        quit_button.setFrame_(NSMakeRect(18, 14, 130, 30))
-        content.addSubview_(quit_button)
-        self._keys_button = NSButton.buttonWithTitle_target_action_("API-ключи…", None, None)
-        self._keys_button.setFrame_(NSMakeRect(158, 14, 142, 30))
-        content.addSubview_(self._keys_button)
-        return self
+            for title, action, x, width in (
+                ("↑ Выше", "moveUp:", 18, 130), ("↓ Ниже", "moveDown:", 154, 130),
+                ("Сбросить положение", "resetPosition:", 290, 218),
+            ):
+                button = NSButton.buttonWithTitle_target_action_(title, self, action)
+                button.setFrame_(NSMakeRect(x, 112, width, 30))
+                content.addSubview_(button)
+            self._info = NSTextField.wrappingLabelWithString_("")
+            self._info.setFont_(NSFont.systemFontOfSize_(11))
+            self._info.setTextColor_(NSColor.secondaryLabelColor())
+            self._info.setFrame_(NSMakeRect(20, 54, 600, 48))
+            content.addSubview_(self._info)
+            for title, action, x in (("Отмена", "cancel:", 392), ("Применить", "apply:", 506)):
+                button = NSButton.buttonWithTitle_target_action_(title, self, action)
+                button.setFrame_(NSMakeRect(x, 14, 114, 30))
+                content.addSubview_(button)
+            quit_button = NSButton.buttonWithTitle_target_action_("Завершить", self, "quit:")
+            quit_button.setFrame_(NSMakeRect(18, 14, 130, 30))
+            content.addSubview_(quit_button)
+            self._keys_button = NSButton.buttonWithTitle_target_action_("API-ключи…", None, None)
+            self._keys_button.setFrame_(NSMakeRect(158, 14, 142, 30))
+            content.addSubview_(self._keys_button)
+            return self
 
-    @objc.python_method
-    def show(self, preferences, audio_name):
-        displays = get_displays()
-        popup = self._popups["audio_source"]
-        popup.removeAllItems()
-        for value, title in (("microphone", "Микрофон — мой голос / человек рядом"),
-                             ("system", "Звук компьютера — собеседник в звонке / видео")):
-            popup.addItemWithTitle_(title)
-            popup.lastItem().setRepresentedObject_(value)
-            if preferences.audio_source == value:
-                popup.selectItem_(popup.lastItem())
-        for name in ("overlay_display", "controls_display", "capture_display"):
-            popup = self._popups[name]
+        @objc.python_method
+        def show(self, preferences, audio_name):
+            displays = get_displays()
+            popup = self._popups["audio_source"]
             popup.removeAllItems()
-            selected = getattr(preferences, name)
-            keys = [display["key"] for display in displays]
-            if selected not in keys:
-                popup.addItemWithTitle_("Экран отключён — выберите другой")
-            for display in displays:
-                popup.addItemWithTitle_(display["title"])
-                popup.lastItem().setRepresentedObject_(display["key"])
-                if display["key"] == selected:
+            for value, title in (("microphone", "Микрофон — мой голос / человек рядом"),
+                                 ("system", "Звук компьютера — собеседник в звонке / видео")):
+                popup.addItemWithTitle_(title)
+                popup.lastItem().setRepresentedObject_(value)
+                if preferences.audio_source == value:
                     popup.selectItem_(popup.lastItem())
-        popup = self._popups["audio_seconds"]
-        popup.removeAllItems()
-        for seconds in sorted({8, 15, 30, 45, 60, preferences.audio_seconds}):
-            popup.addItemWithTitle_(f"{seconds} секунд" + (" — больше контекста" if seconds == 30 else ""))
-            popup.lastItem().setTag_(seconds)
-            if seconds == preferences.audio_seconds:
-                popup.selectItem_(popup.lastItem())
-        self._info.setStringValue_(
-            f"Источник звука: {audio_name}.\n"
-            "Звук компьютера слышит звонок даже в наушниках; микрофон в этом режиме не передаётся. "
-            "8 с могут обрезать вопрос; для длинных вопросов выберите 30–60 с."
-        )
-        self._panel.center()
-        self._panel.makeKeyAndOrderFront_(None)
+            for name in ("overlay_display", "controls_display", "capture_display"):
+                popup = self._popups[name]
+                popup.removeAllItems()
+                selected = getattr(preferences, name)
+                keys = [display["key"] for display in displays]
+                if selected not in keys:
+                    popup.addItemWithTitle_("Экран отключён — выберите другой")
+                for display in displays:
+                    popup.addItemWithTitle_(display["title"])
+                    popup.lastItem().setRepresentedObject_(display["key"])
+                    if display["key"] == selected:
+                        popup.selectItem_(popup.lastItem())
+            popup = self._popups["audio_seconds"]
+            popup.removeAllItems()
+            for seconds in sorted({8, 15, 30, 45, 60, preferences.audio_seconds}):
+                popup.addItemWithTitle_(f"{seconds} секунд" + (" — больше контекста" if seconds == 30 else ""))
+                popup.lastItem().setTag_(seconds)
+                if seconds == preferences.audio_seconds:
+                    popup.selectItem_(popup.lastItem())
+            self._info.setStringValue_(
+                f"Источник звука: {audio_name}.\n"
+                "Звук компьютера слышит звонок даже в наушниках; микрофон в этом режиме не передаётся. "
+                "8 с могут обрезать вопрос; для длинных вопросов выберите 30–60 с."
+            )
+            self._panel.center()
+            self._panel.makeKeyAndOrderFront_(None)
 
-    def apply_(self, sender):
-        values = {name: popup.selectedItem().representedObject() for name, popup in self._popups.items()
-                  if name != "audio_seconds"}
-        values["audio_seconds"] = self._popups["audio_seconds"].selectedItem().tag()
-        try:
-            self._apply(values)
-        except (ValueError, OSError) as error:
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Не удалось применить настройки")
-            alert.setInformativeText_(str(error))
-            alert.runModal()
-            return
-        self._panel.orderOut_(None)
-
-    def cancel_(self, sender):
-        self._panel.orderOut_(None)
-
-    def quit_(self, sender):
-        AppHelper.stopEventLoop()
-
-    def moveUp_(self, sender):
-        self._move(40)
-
-    def moveDown_(self, sender):
-        self._move(-40)
-
-    def resetPosition_(self, sender):
-        self._move(None)
-
-
-class WindowObserver(NSObject):
-    def initWithCallback_(self, callback):
-        self = objc.super(WindowObserver, self).init()
-        if self is not None:
-            self._callback = callback
-        return self
-
-    def windowDidMove_(self, notification):
-        NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(self, "rememberWindow:", None)
-        self._window = notification.object()
-        self.performSelector_withObject_afterDelay_("rememberWindow:", None, 0.3)
-
-    def rememberWindow_(self, sender):
-        self._callback(self._window)
-
-
-class Controls(NSObject):
-    """Native draggable toolbar, display preferences and shortcut labels."""
-
-    def initWithActions_(self, actions):
-        self = objc.super(Controls, self).init()
-        if self is None:
-            return None
-        self._actions = actions
-        panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(50, 50, 620, 334), NSWindowStyleMaskTitled,
-            NSBackingStoreBuffered, False,
-        )
-        panel.setTitle_("Помощник — перетащите окно за этот заголовок")
-        panel.setSharingType_(NSWindowSharingNone)
-        panel.setLevel_(NSFloatingWindowLevel)
-        panel.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces
-                                    | NSWindowCollectionBehaviorFullScreenAuxiliary
-                                    | NSWindowCollectionBehaviorIgnoresCycle)
-        panel.setHidesOnDeactivate_(False)
-        panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
-        panel.setMovable_(True)
-        panel.setMovableByWindowBackground_(True)
-        content = panel.contentView()
-        self._status = NSTextField.wrappingLabelWithString_("")
-        self._status.setFont_(NSFont.systemFontOfSize_(11))
-        self._status.setTextColor_(NSColor.secondaryLabelColor())
-        self._status.setFrame_(NSMakeRect(16, 8, 588, 112))
-        content.addSubview_(self._status)
-        self._buttons = []
-        specs = (
-            ("Вопрос по файлам  ⌥A", "context", 14, 248, 406),
-            ("Файлы…", "files", 428, 248, 178),
-            ("Только звук  ⌥Q", "audio", 14, 208, 190),
-            ("Подсказка  ⌥Z", "live", 212, 208, 208),
-            ("Ответ / код  ⌥X", "answer", 428, 208, 178),
-            ("Только экран", "screen", 14, 168, 190),
-            ("Очистить", "clear", 212, 168, 208),
-            ("Настройки…", "settings", 428, 168, 178),
-            ("Поток: пауза / пуск", "streaming", 14, 128, 406),
-            ("↑", "up", 428, 128, 85),
-            ("↓", "down", 521, 128, 85),
-        )
-        self._names = [spec[1] for spec in specs]
-        for index, (title, name, x, y, width) in enumerate(specs):
-            button = NSButton.buttonWithTitle_target_action_(title, self, "press:")
-            button.setFrame_(NSMakeRect(x, y + 40, width, 32))
-            button.setFont_(NSFont.systemFontOfSize_(12))
-            button.setTag_(index)
-            content.addSubview_(button)
-            self._buttons.append(button)
-        quit_button = NSButton.buttonWithTitle_target_action_("Закрыть полностью", self, "quit:")
-        quit_button.setFrame_(NSMakeRect(14, 128, 592, 32))
-        quit_button.setFont_(NSFont.systemFontOfSize_(12))
-        quit_button.setToolTip_("Завершить приложение и остановить захват звука")
-        content.addSubview_(quit_button)
-        self._panel = panel
-        self._placing = False
-        return self
-
-    @objc.python_method
-    def configure(self, preferences, overlay, audio, assistant):
-        self._preferences, self._overlay, self._audio, self._assistant = preferences, overlay, audio, assistant
-        audio.on_status = lambda: AppHelper.callAfter(self.update_status)
-        self._settings = SettingsPanel.alloc().initWithApply_move_(self.apply_preferences, self.move_overlay)
-        assistant.context_files = tuple(preferences.context_files)
-        self._files_panel = FileContextPanel.alloc().initWithPreferences_changed_(preferences, self.files_changed)
-        self._actions["files"] = self._files_panel.show
-        self._keys_panel = ApiKeysPanel.alloc().initWithPool_saved_(assistant.keys, assistant.credentials_changed)
-        self._settings._keys_button.setTarget_(self)
-        self._settings._keys_button.setAction_("openKeys:")
-        assistant.keys.on_change = lambda: AppHelper.callAfter(self.update_status)
-        self._actions["settings"] = lambda: self._settings.show(self._preferences, self._audio.device_name)
-        menu = NSMenu.alloc().initWithTitle_("Помощник")
-        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Помощник", None, "")
-        submenu = NSMenu.alloc().initWithTitle_("Помощник")
-        for title, action, key in (("Настройки…", "openSettings:", ","), ("Завершить помощника", "quit:", "q")):
-            entry = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key)
-            entry.setTarget_(self)
-            submenu.addItem_(entry)
-        item.setSubmenu_(submenu)
-        menu.addItem_(item)
-        edit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Правка", None, "")
-        edit_menu = NSMenu.alloc().initWithTitle_("Правка")
-        for title, action, key in (("Отменить", "undo:", "z"), ("Вырезать", "cut:", "x"),
-                                   ("Копировать", "copy:", "c"), ("Вставить", "paste:", "v"),
-                                   ("Выделить всё", "selectAll:", "a")):
-            edit_menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key))
-        edit_item.setSubmenu_(edit_menu)
-        menu.addItem_(edit_item)
-        NSApplication.sharedApplication().setMainMenu_(menu)
-        self._observers = []
-        for kind, panel in (("overlay", overlay._panel), ("controls", self._panel)):
-            observer = WindowObserver.alloc().initWithCallback_(lambda window, kind=kind: self.remember_window(kind, window))
-            panel.setDelegate_(observer)
-            self._observers.append(observer)
-        NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
-            self, "screensChanged:", NSApplicationDidChangeScreenParametersNotification, None,
-        )
-        displays = get_displays()
-        if preferences.capture_display is None or "MONITOR" in os.environ:
-            preferences.capture_display = (displays[MONITOR_INDEX - 1]["key"]
-                                           if 1 <= MONITOR_INDEX <= len(displays)
-                                           else f"missing-monitor:{MONITOR_INDEX}")
-        self.restore_layout()
-
-    @objc.python_method
-    def restore_layout(self):
-        displays = get_displays()
-        if not displays:
-            return
-        by_key = {display["key"]: display for display in displays}
-        self._placing = True
-        try:
-            for kind, panel in (("overlay", self._overlay._panel), ("controls", self._panel)):
-                display = by_key.get(getattr(self._preferences, f"{kind}_display"), displays[0])
-                setattr(self._preferences, f"{kind}_display", display["key"])
-                visible = display["screen"].visibleFrame()
-                if kind == "overlay":
-                    height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 400))
-                    panel.setContentSize_(NSMakeSize(OVERLAY_WIDTH, height))
-                size = panel.frame().size
-                origin = getattr(self._preferences, f"{kind}_origin")
-                x, y = origin if origin else (
-                    visible.origin.x + visible.size.width - size.width - 20,
-                    visible.origin.y + (20 if kind == "overlay" else visible.size.height - size.height - 16),
-                )
-                x = max(visible.origin.x, min(x, visible.origin.x + max(0, visible.size.width - size.width)))
-                y = max(visible.origin.y, min(y, visible.origin.y + max(0, visible.size.height - size.height)))
-                panel.setFrameOrigin_(NSMakePoint(x, y))
-                setattr(self._preferences, f"{kind}_origin", [x, y])
-        finally:
-            self._placing = False
-        capture = by_key.get(self._preferences.capture_display)
-        self._assistant.capture_display_id = capture["id"] if capture else -1
-        self._audio.set_seconds(self._preferences.audio_seconds)
-        self.update_status()
-
-    @objc.python_method
-    def update_status(self):
-        displays = {display["key"]: display for display in get_displays()}
-        lines = []
-        for name, title in (("capture_display", "Экран для снимков"), ("overlay_display", "Подсказка"),
-                            ("controls_display", "Панель кнопок")):
-            display = displays.get(getattr(self._preferences, name))
-            lines.append(f"{title}: {display['title'] if display else 'экран отключён — откройте настройки'}")
-        audio_error = getattr(self._audio, "error", "")
-        lines.append(f"Аудио: {audio_error or self._audio.device_name} · буфер {self._preferences.audio_seconds} с")
-        lines.append(self._assistant.keys.status())
-        realtime = getattr(self._assistant, "_realtime", None)
-        lines.append(realtime.status() if realtime else "Поток: запуск…")
-        self._buttons[self._names.index("context")].setToolTip_(
-            f"Выбрано документов: {len(self._preferences.context_files)}. Задайте вопрос вслух; экран не отправляется.")
-        self._buttons[self._names.index("files")].setTitle_(f"Файлы ({len(self._preferences.context_files)})…")
-        self._buttons[self._names.index("streaming")].setTitle_(
-            "Пауза потока" if realtime and realtime.enabled else "Включить поток")
-        self._status.setStringValue_("\n".join(lines))
-        self._status.setToolTip_("\n".join(lines))
-
-    @objc.python_method
-    def remember_window(self, kind, panel):
-        if self._placing:
-            return
-        screen = panel.screen()
-        if screen is None:
-            return
-        display = next((d for d in get_displays() if d["id"] == int(screen.deviceDescription()["NSScreenNumber"])), None)
-        if display:
-            setattr(self._preferences, f"{kind}_display", display["key"])
-            origin = panel.frame().origin
-            setattr(self._preferences, f"{kind}_origin", [origin.x, origin.y])
-            self.update_status()
-            self.save_(None)
-
-    def save_(self, sender):
-        try:
-            self._preferences.save()
-        except OSError as error:
-            print(f"Не удалось сохранить положение окон: {error}")
-
-    @objc.python_method
-    def move_overlay(self, distance):
-        panel = self._overlay._panel
-        if distance is None:
-            self._preferences.overlay_origin = None
-            self.restore_layout()
-        else:
-            visible = panel.screen().visibleFrame()
-            frame = panel.frame()
-            y = max(visible.origin.y, min(frame.origin.y + distance,
-                    visible.origin.y + max(0, visible.size.height - frame.size.height)))
-            panel.setFrameOrigin_(NSMakePoint(frame.origin.x, y))
-            self.remember_window("overlay", panel)
-        self._preferences.save()
-        panel.orderFrontRegardless()
-
-    @objc.python_method
-    def apply_preferences(self, values):
-        keys = {display["key"] for display in get_displays()}
-        if any(values[name] not in keys for name in ("overlay_display", "controls_display", "capture_display")):
-            raise ValueError("Выберите подключённый экран в каждом списке.")
-        if values.get("audio_source", self._preferences.audio_source) != self._audio.source or self._audio.error:
-            self._assistant.clear()
+        def apply_(self, sender):
+            values = {name: popup.selectedItem().representedObject() for name, popup in self._popups.items()
+                      if name != "audio_seconds"}
+            values["audio_seconds"] = self._popups["audio_seconds"].selectedItem().tag()
             try:
-                self._audio.set_source(values.get("audio_source", self._preferences.audio_source))
-            except (OSError, ValueError, subprocess.SubprocessError) as error:
-                self._audio._source_error(str(error))
-                raise ValueError(str(error)) from error
-            self._assistant.clear()
-        for kind in ("overlay", "controls"):
-            if values[f"{kind}_display"] != getattr(self._preferences, f"{kind}_display"):
-                setattr(self._preferences, f"{kind}_origin", None)
-        for name, value in values.items():
-            setattr(self._preferences, name, value)
-        self.restore_layout()
-        self._preferences.save()
+                self._apply(values)
+            except (ValueError, OSError) as error:
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_("Не удалось применить настройки")
+                alert.setInformativeText_(str(error))
+                alert.runModal()
+                return
+            self._panel.orderOut_(None)
 
-    def screensChanged_(self, notification):
-        self.restore_layout()
+        def cancel_(self, sender):
+            self._panel.orderOut_(None)
 
-    @objc.python_method
-    def files_changed(self):
-        self._assistant.context_files = tuple(self._preferences.context_files)
-        self._assistant._generation += 1
-        self.update_status()
+        def quit_(self, sender):
+            AppHelper.stopEventLoop()
 
-    def openSettings_(self, sender):
-        self._actions["settings"]()
+        def moveUp_(self, sender):
+            self._move(40)
 
-    def openKeys_(self, sender):
-        self._keys_panel.show()
+        def moveDown_(self, sender):
+            self._move(-40)
 
-    def quit_(self, sender):
-        AppHelper.stopEventLoop()
+        def resetPosition_(self, sender):
+            self._move(None)
 
-    def press_(self, sender):
-        self._actions[self._names[sender.tag()]]()
 
-    @objc.python_method
-    def show(self):
-        self._panel.orderFrontRegardless()
+    class WindowObserver(NSObject):
+        def initWithCallback_(self, callback):
+            self = objc.super(WindowObserver, self).init()
+            if self is not None:
+                self._callback = callback
+            return self
+
+        def windowDidMove_(self, notification):
+            NSObject.cancelPreviousPerformRequestsWithTarget_selector_object_(self, "rememberWindow:", None)
+            self._window = notification.object()
+            self.performSelector_withObject_afterDelay_("rememberWindow:", None, 0.3)
+
+        def rememberWindow_(self, sender):
+            self._callback(self._window)
+
+
+    class Controls(NSObject):
+        """Native draggable toolbar, display preferences and shortcut labels."""
+
+        def initWithActions_(self, actions):
+            self = objc.super(Controls, self).init()
+            if self is None:
+                return None
+            self._actions = actions
+            panel = DraggablePanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                NSMakeRect(50, 50, 620, 334), NSWindowStyleMaskTitled,
+                NSBackingStoreBuffered, False,
+            )
+            panel.setTitle_("Помощник — перетащите окно за этот заголовок")
+            panel.setSharingType_(NSWindowSharingNone)
+            panel.setLevel_(NSFloatingWindowLevel)
+            panel.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces
+                                        | NSWindowCollectionBehaviorFullScreenAuxiliary
+                                        | NSWindowCollectionBehaviorIgnoresCycle)
+            panel.setHidesOnDeactivate_(False)
+            panel.setAppearance_(NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua))
+            panel.setMovable_(True)
+            panel.setMovableByWindowBackground_(True)
+            content = panel.contentView()
+            self._status = NSTextField.wrappingLabelWithString_("")
+            self._status.setFont_(NSFont.systemFontOfSize_(11))
+            self._status.setTextColor_(NSColor.secondaryLabelColor())
+            self._status.setFrame_(NSMakeRect(16, 8, 588, 112))
+            content.addSubview_(self._status)
+            self._buttons = []
+            specs = (
+                ("Вопрос по файлам  ⌥A", "context", 14, 248, 406),
+                ("Файлы…", "files", 428, 248, 178),
+                ("Только звук  ⌥Q", "audio", 14, 208, 190),
+                ("Подсказка  ⌥Z", "live", 212, 208, 208),
+                ("Ответ / код  ⌥X", "answer", 428, 208, 178),
+                ("Только экран", "screen", 14, 168, 190),
+                ("Очистить", "clear", 212, 168, 208),
+                ("Настройки…", "settings", 428, 168, 178),
+                ("Поток: пауза / пуск", "streaming", 14, 128, 406),
+                ("↑", "up", 428, 128, 85),
+                ("↓", "down", 521, 128, 85),
+            )
+            self._names = [spec[1] for spec in specs]
+            for index, (title, name, x, y, width) in enumerate(specs):
+                button = NSButton.buttonWithTitle_target_action_(title, self, "press:")
+                button.setFrame_(NSMakeRect(x, y + 40, width, 32))
+                button.setFont_(NSFont.systemFontOfSize_(12))
+                button.setTag_(index)
+                content.addSubview_(button)
+                self._buttons.append(button)
+            quit_button = NSButton.buttonWithTitle_target_action_("Закрыть полностью", self, "quit:")
+            quit_button.setFrame_(NSMakeRect(14, 128, 592, 32))
+            quit_button.setFont_(NSFont.systemFontOfSize_(12))
+            quit_button.setToolTip_("Завершить приложение и остановить захват звука")
+            content.addSubview_(quit_button)
+            self._panel = panel
+            self._placing = False
+            return self
+
+        @objc.python_method
+        def configure(self, preferences, overlay, audio, assistant):
+            self._preferences, self._overlay, self._audio, self._assistant = preferences, overlay, audio, assistant
+            audio.on_status = lambda: AppHelper.callAfter(self.update_status)
+            self._settings = SettingsPanel.alloc().initWithApply_move_(self.apply_preferences, self.move_overlay)
+            assistant.context_files = tuple(preferences.context_files)
+            self._files_panel = FileContextPanel.alloc().initWithPreferences_changed_(preferences, self.files_changed)
+            self._actions["files"] = self._files_panel.show
+            self._keys_panel = ApiKeysPanel.alloc().initWithPool_saved_(assistant.keys, assistant.credentials_changed)
+            self._settings._keys_button.setTarget_(self)
+            self._settings._keys_button.setAction_("openKeys:")
+            assistant.keys.on_change = lambda: AppHelper.callAfter(self.update_status)
+            self._actions["settings"] = lambda: self._settings.show(self._preferences, self._audio.device_name)
+            menu = NSMenu.alloc().initWithTitle_("Помощник")
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Помощник", None, "")
+            submenu = NSMenu.alloc().initWithTitle_("Помощник")
+            for title, action, key in (("Настройки…", "openSettings:", ","), ("Завершить помощника", "quit:", "q")):
+                entry = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key)
+                entry.setTarget_(self)
+                submenu.addItem_(entry)
+            item.setSubmenu_(submenu)
+            menu.addItem_(item)
+            edit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Правка", None, "")
+            edit_menu = NSMenu.alloc().initWithTitle_("Правка")
+            for title, action, key in (("Отменить", "undo:", "z"), ("Вырезать", "cut:", "x"),
+                                       ("Копировать", "copy:", "c"), ("Вставить", "paste:", "v"),
+                                       ("Выделить всё", "selectAll:", "a")):
+                edit_menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key))
+            edit_item.setSubmenu_(edit_menu)
+            menu.addItem_(edit_item)
+            NSApplication.sharedApplication().setMainMenu_(menu)
+            self._observers = []
+            for kind, panel in (("overlay", overlay._panel), ("controls", self._panel)):
+                observer = WindowObserver.alloc().initWithCallback_(lambda window, kind=kind: self.remember_window(kind, window))
+                panel.setDelegate_(observer)
+                self._observers.append(observer)
+            NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
+                self, "screensChanged:", NSApplicationDidChangeScreenParametersNotification, None,
+            )
+            displays = get_displays()
+            if preferences.capture_display is None or "MONITOR" in os.environ:
+                preferences.capture_display = (displays[MONITOR_INDEX - 1]["key"]
+                                               if 1 <= MONITOR_INDEX <= len(displays)
+                                               else f"missing-monitor:{MONITOR_INDEX}")
+            self.restore_layout()
+
+        @objc.python_method
+        def restore_layout(self):
+            displays = get_displays()
+            if not displays:
+                return
+            by_key = {display["key"]: display for display in displays}
+            self._placing = True
+            try:
+                for kind, panel in (("overlay", self._overlay._panel), ("controls", self._panel)):
+                    display = by_key.get(getattr(self._preferences, f"{kind}_display"), displays[0])
+                    setattr(self._preferences, f"{kind}_display", display["key"])
+                    visible = display["screen"].visibleFrame()
+                    if kind == "overlay":
+                        height = max(200, min(visible.size.height * OVERLAY_HEIGHT_RATIO, visible.size.height - 400))
+                        panel.setContentSize_(NSMakeSize(OVERLAY_WIDTH, height))
+                    size = panel.frame().size
+                    origin = getattr(self._preferences, f"{kind}_origin")
+                    x, y = origin if origin else (
+                        visible.origin.x + visible.size.width - size.width - 20,
+                        visible.origin.y + (20 if kind == "overlay" else visible.size.height - size.height - 16),
+                    )
+                    x = max(visible.origin.x, min(x, visible.origin.x + max(0, visible.size.width - size.width)))
+                    y = max(visible.origin.y, min(y, visible.origin.y + max(0, visible.size.height - size.height)))
+                    panel.setFrameOrigin_(NSMakePoint(x, y))
+                    setattr(self._preferences, f"{kind}_origin", [x, y])
+            finally:
+                self._placing = False
+            capture = by_key.get(self._preferences.capture_display)
+            self._assistant.capture_display_id = capture["id"] if capture else -1
+            self._audio.set_seconds(self._preferences.audio_seconds)
+            self.update_status()
+
+        @objc.python_method
+        def update_status(self):
+            displays = {display["key"]: display for display in get_displays()}
+            lines = []
+            for name, title in (("capture_display", "Экран для снимков"), ("overlay_display", "Подсказка"),
+                                ("controls_display", "Панель кнопок")):
+                display = displays.get(getattr(self._preferences, name))
+                lines.append(f"{title}: {display['title'] if display else 'экран отключён — откройте настройки'}")
+            audio_error = getattr(self._audio, "error", "")
+            lines.append(f"Аудио: {audio_error or self._audio.device_name} · буфер {self._preferences.audio_seconds} с")
+            lines.append(self._assistant.keys.status())
+            realtime = getattr(self._assistant, "_realtime", None)
+            lines.append(realtime.status() if realtime else "Поток: запуск…")
+            self._buttons[self._names.index("context")].setToolTip_(
+                f"Выбрано документов: {len(self._preferences.context_files)}. Задайте вопрос вслух; экран не отправляется.")
+            self._buttons[self._names.index("files")].setTitle_(f"Файлы ({len(self._preferences.context_files)})…")
+            self._buttons[self._names.index("streaming")].setTitle_(
+                "Пауза потока" if realtime and realtime.enabled else "Включить поток")
+            self._status.setStringValue_("\n".join(lines))
+            self._status.setToolTip_("\n".join(lines))
+
+        @objc.python_method
+        def remember_window(self, kind, panel):
+            if self._placing:
+                return
+            screen = panel.screen()
+            if screen is None:
+                return
+            display = next((d for d in get_displays() if d["id"] == int(screen.deviceDescription()["NSScreenNumber"])), None)
+            if display:
+                setattr(self._preferences, f"{kind}_display", display["key"])
+                origin = panel.frame().origin
+                setattr(self._preferences, f"{kind}_origin", [origin.x, origin.y])
+                self.update_status()
+                self.save_(None)
+
+        def save_(self, sender):
+            try:
+                self._preferences.save()
+            except OSError as error:
+                print(f"Не удалось сохранить положение окон: {error}")
+
+        @objc.python_method
+        def move_overlay(self, distance):
+            panel = self._overlay._panel
+            if distance is None:
+                self._preferences.overlay_origin = None
+                self.restore_layout()
+            else:
+                visible = panel.screen().visibleFrame()
+                frame = panel.frame()
+                y = max(visible.origin.y, min(frame.origin.y + distance,
+                        visible.origin.y + max(0, visible.size.height - frame.size.height)))
+                panel.setFrameOrigin_(NSMakePoint(frame.origin.x, y))
+                self.remember_window("overlay", panel)
+            self._preferences.save()
+            panel.orderFrontRegardless()
+
+        @objc.python_method
+        def apply_preferences(self, values):
+            keys = {display["key"] for display in get_displays()}
+            if any(values[name] not in keys for name in ("overlay_display", "controls_display", "capture_display")):
+                raise ValueError("Выберите подключённый экран в каждом списке.")
+            if values.get("audio_source", self._preferences.audio_source) != self._audio.source or self._audio.error:
+                self._assistant.clear()
+                try:
+                    self._audio.set_source(values.get("audio_source", self._preferences.audio_source))
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    self._audio._source_error(str(error))
+                    raise ValueError(str(error)) from error
+                self._assistant.clear()
+            for kind in ("overlay", "controls"):
+                if values[f"{kind}_display"] != getattr(self._preferences, f"{kind}_display"):
+                    setattr(self._preferences, f"{kind}_origin", None)
+            for name, value in values.items():
+                setattr(self._preferences, name, value)
+            self.restore_layout()
+            self._preferences.save()
+
+        def screensChanged_(self, notification):
+            self.restore_layout()
+
+        @objc.python_method
+        def files_changed(self):
+            self._assistant.context_files = tuple(self._preferences.context_files)
+            self._assistant._generation += 1
+            self.update_status()
+
+        def openSettings_(self, sender):
+            self._actions["settings"]()
+
+        def openKeys_(self, sender):
+            self._keys_panel.show()
+
+        def quit_(self, sender):
+            AppHelper.stopEventLoop()
+
+        def press_(self, sender):
+            self._actions[self._names[sender.tag()]]()
+
+        @objc.python_method
+        def show(self):
+            self._panel.orderFrontRegardless()
+
+else:
+    from windows_platform import get_displays, capture_screenshot
+
 
 # --- Gemini -------------------------------------------------------------------
 
@@ -814,7 +837,7 @@ class Assistant:
         self._audio = audio
         self.keys = keys
         self._capture_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="capture")
-        self.capture_display_id = Quartz.CGMainDisplayID()
+        self.capture_display_id = Quartz.CGMainDisplayID() if sys.platform == 'darwin' else None
         self._realtime = None
         self.context_files = ()
         self._file_context = FileContext()
@@ -1178,49 +1201,54 @@ class Assistant:
 
 # --- Global hotkeys -----------------------------------------------------------
 
-class Hotkeys:
-    """Session-level CGEventTap that swallows Option+Q/Z/X combos. Needs Accessibility permission."""
+if sys.platform == 'darwin':
+    class Hotkeys:
+        """Session-level CGEventTap that swallows Option+Q/Z/X combos. Needs Accessibility permission."""
 
-    def __init__(self, actions):
-        self._actions = actions  # keycode -> (callable, fire_on_autorepeat)
-        self._tap = Quartz.CGEventTapCreate(
-            Quartz.kCGSessionEventTap,
-            Quartz.kCGHeadInsertEventTap,
-            Quartz.kCGEventTapOptionDefault,
-            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
-            self._on_event,
-            None,
-        )
-        if self._tap is None:
-            sys.exit(
-                "Cannot create event tap. Grant Accessibility to your terminal app in "
-                "System Settings → Privacy & Security → Accessibility, then restart it."
+        def __init__(self, actions):
+            self._actions = actions  # keycode -> (callable, fire_on_autorepeat)
+            self._tap = Quartz.CGEventTapCreate(
+                Quartz.kCGSessionEventTap,
+                Quartz.kCGHeadInsertEventTap,
+                Quartz.kCGEventTapOptionDefault,
+                Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown),
+                self._on_event,
+                None,
             )
-        source = Quartz.CFMachPortCreateRunLoopSource(None, self._tap, 0)
-        Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetMain(), source, Quartz.kCFRunLoopCommonModes)
-        Quartz.CGEventTapEnable(self._tap, True)
-
-    def _on_event(self, proxy, event_type, event, refcon):
-        if event_type in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
+            if self._tap is None:
+                sys.exit(
+                    "Cannot create event tap. Grant Accessibility to your terminal app in "
+                    "System Settings → Privacy & Security → Accessibility, then restart it."
+                )
+            source = Quartz.CFMachPortCreateRunLoopSource(None, self._tap, 0)
+            Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetMain(), source, Quartz.kCFRunLoopCommonModes)
             Quartz.CGEventTapEnable(self._tap, True)
-            return event
-        if (Quartz.CGEventGetFlags(event) & MODIFIER_MASK) != HOTKEY_MODIFIERS:
-            return event
-        keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
-        if keycode not in self._actions:
-            return event
-        action, fire_on_autorepeat = self._actions[keycode]
-        if fire_on_autorepeat or not Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat):
-            try:
-                action()
-            except Exception as e:
-                print(f"Hotkey action failed: {e}", file=sys.stderr)
-        return None  # swallow
+
+        def _on_event(self, proxy, event_type, event, refcon):
+            if event_type in (Quartz.kCGEventTapDisabledByTimeout, Quartz.kCGEventTapDisabledByUserInput):
+                Quartz.CGEventTapEnable(self._tap, True)
+                return event
+            if (Quartz.CGEventGetFlags(event) & MODIFIER_MASK) != HOTKEY_MODIFIERS:
+                return event
+            keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+            if keycode not in self._actions:
+                return event
+            action, fire_on_autorepeat = self._actions[keycode]
+            if fire_on_autorepeat or not Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventAutorepeat):
+                try:
+                    action()
+                except Exception as e:
+                    print(f"Hotkey action failed: {e}", file=sys.stderr)
+            return None  # swallow
 
 
 # --- Main ---------------------------------------------------------------------
 
 def main():
+    if sys.platform == 'win32':
+        from windows_ui import run
+        return run(sys.modules[__name__])
+
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)  # no Dock icon, not in Cmd+Tab
 

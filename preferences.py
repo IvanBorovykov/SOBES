@@ -3,10 +3,14 @@
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 
-DEFAULT_PATH = Path.home() / "Library/Application Support/InterviewAssistant/settings.json"
+if sys.platform == 'win32':
+    DEFAULT_PATH = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData/Local')) / 'InterviewAssistant/settings.json'
+else:
+    DEFAULT_PATH = Path.home() / "Library/Application Support/InterviewAssistant/settings.json"
 MAX_AUDIO_SECONDS = 60
 
 
@@ -22,7 +26,7 @@ class Preferences:
         self.overlay_origin = None
         self.controls_origin = None
         try:
-            data = json.loads(self.path.read_text())
+            data = json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             data = {}
         except (OSError, ValueError) as error:
@@ -61,5 +65,5 @@ class Preferences:
         )}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding='utf-8')
         temporary.replace(self.path)

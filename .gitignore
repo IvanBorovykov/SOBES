@@ -7,6 +7,7 @@ __pycache__/
 .env.*
 !.env.example
 *.log
+*.dpapi
 settings.json
 *.wav
 *.pcm

@@ -1,7 +1,11 @@
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+if sys.platform != 'darwin':
+    raise unittest.SkipTest('macOS file picker; Windows is covered by test_windows')
 
 from AppKit import NSAlertFirstButtonReturn, NSApplication, NSModalResponseOK
 from Foundation import NSMutableIndexSet
@@ -10,29 +14,6 @@ from file_context import MAX_FILES, folder_paths
 from file_context_ui import FileContextPanel
 import file_context_ui
 from preferences import Preferences
-
-
-class FolderFilesTests(unittest.TestCase):
-    def test_folder_includes_supported_nested_files_and_skips_dependencies_and_links(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            expected = []
-            for name in ('main.py', 'src/service.py', 'notes.md', 'image.png',
-                         '.secret.py', '.venv/lib.py', 'node_modules/test.js',
-                         '__pycache__/test.py', 'venv/lib.py'):
-                path = root / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('text')
-                if name in ('main.py', 'src/service.py', 'notes.md'):
-                    expected.append(str(path))
-            (root / 'link.py').symlink_to(root / 'main.py')
-            (root / 'loop').symlink_to(root, target_is_directory=True)
-            self.assertCountEqual(folder_paths(root), expected)
-
-    def test_folder_scan_is_bounded_without_returning_partial_results(self):
-        with patch('file_context.os.walk', return_value=[('/tmp', [], ['x.py'] * 5001)]):
-            with self.assertRaisesRegex(ValueError, 'Папка слишком большая'):
-                folder_paths('/tmp')
 
 
 class FileContextPanelTests(unittest.TestCase):

@@ -1,8 +1,12 @@
 google-genai
-pyaudio
+pyaudio; sys_platform == 'darwin'
+PyAudioWPatch>=0.2.12.7; sys_platform == 'win32'
+audioop-lts; sys_platform == 'win32' and python_version >= '3.13'
+pypdf>=5; sys_platform == 'win32'
+tzdata; sys_platform == 'win32'
 mss
 Pillow
-pyobjc-core
-pyobjc-framework-Cocoa
-pyobjc-framework-Quartz
-pyobjc-framework-Security
+pyobjc-core; sys_platform == 'darwin'
+pyobjc-framework-Cocoa; sys_platform == 'darwin'
+pyobjc-framework-Quartz; sys_platform == 'darwin'
+pyobjc-framework-Security; sys_platform == 'darwin'

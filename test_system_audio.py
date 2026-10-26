@@ -1,6 +1,7 @@
 import io
 import threading
 import unittest
+import sys
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,6 +11,7 @@ from system_audio import SystemAudio
 
 
 class SystemAudioTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin', 'Swift helper pipe')
     def test_pipe_fragments_are_reassembled_into_exact_20ms_frames(self):
         chunks = []
         fragments = iter([b'a' * 100, b'b' * 540, b'c' * 640, b'd' * 30, b''])
@@ -70,6 +72,7 @@ class SystemAudioTests(unittest.TestCase):
             self.assertEqual(ring.error, '')
             ring.close()
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'Swift helper pipe')
     def test_ready_is_not_an_error_but_unexpected_exit_is(self):
         errors = []
         reader = SimpleNamespace(_stopped=False, _process=SimpleNamespace(
@@ -79,6 +82,7 @@ class SystemAudioTests(unittest.TestCase):
         reader._on_ready.assert_called_once()
         self.assertNotIn('READY', errors)
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'Swift helper pipe')
     def test_temporarily_missing_display_waits_and_recovers_on_ready(self):
         ring = self.make_ring()
         reader = SimpleNamespace(_stopped=False, _process=SimpleNamespace(
@@ -94,6 +98,7 @@ class SystemAudioTests(unittest.TestCase):
         self.assertFalse(ring._chunks)
         self.assertEqual(ring.error, '')
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'Swift helper compiler')
     def test_startup_work_does_not_block_constructor(self):
         entered, release = threading.Event(), threading.Event()
         def startup(instance):

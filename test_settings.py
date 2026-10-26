@@ -1,8 +1,12 @@
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+if sys.platform != 'darwin':
+    raise unittest.SkipTest('macOS window and capture APIs; Windows is covered by test_windows')
 
 from AppKit import NSMakeRect
 from Foundation import NSDate, NSObject, NSRunLoop

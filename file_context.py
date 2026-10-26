@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import threading
 import zipfile
 from pathlib import Path
@@ -65,18 +66,32 @@ class FileContext:
         if cached is not None:
             return cached
         if path.suffix.lower() == '.pdf':
-            from Quartz import PDFDocument
-            from Foundation import NSURL
-            document = PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(str(path)))
-            if document is None or document.isLocked():
-                raise ValueError(f'Не удалось прочитать PDF: {path.name}. Проверьте пароль.')
-            if document.pageCount() > 1000:
+            if sys.platform == 'win32':
+                from pypdf import PdfReader
+                from pypdf.errors import PdfReadError
+                try:
+                    document = PdfReader(path)
+                    if document.is_encrypted:
+                        raise ValueError(f'Не удалось прочитать PDF: {path.name}. Проверьте пароль.')
+                    page_count = len(document.pages)
+                    read_page = lambda index: document.pages[index].extract_text() or ''
+                except PdfReadError as error:
+                    raise ValueError(f'Не удалось прочитать PDF: {path.name}.') from error
+            else:
+                from Quartz import PDFDocument
+                from Foundation import NSURL
+                document = PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(str(path)))
+                if document is None or document.isLocked():
+                    raise ValueError(f'Не удалось прочитать PDF: {path.name}. Проверьте пароль.')
+                page_count = document.pageCount()
+                read_page = lambda index: str(document.pageAtIndex_(index).string() or '')
+            if page_count > 1000:
                 raise ValueError(f"Слишком много страниц в {path.name}. Максимум 1000.")
             pages = []
             length = 0
             missing = []
-            for index in range(document.pageCount()):
-                text = str(document.pageAtIndex_(index).string() or '')
+            for index in range(page_count):
+                text = read_page(index)
                 length += len(text)
                 if length > MAX_CHARS:
                     raise ValueError(f'Слишком много текста в {path.name}. Выберите нужные страницы отдельно.')

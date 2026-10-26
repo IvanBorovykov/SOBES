@@ -106,3 +106,7 @@ class SystemAudio:
         self._worker.join(timeout=2)
         if self._reader:
             self._reader.join(timeout=2)
+
+
+if platform.system() == 'Windows':
+    from windows_audio import WindowsSystemAudio as SystemAudio

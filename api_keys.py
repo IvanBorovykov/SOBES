@@ -3,11 +3,13 @@
 import json
 import math
 import re
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 
-import Security
+if sys.platform == 'darwin':
+    import Security
 from google import genai
 from google.genai import types
 
@@ -43,6 +45,16 @@ class KeychainStore:
             status, _ = Security.SecItemAdd({**self._query, Security.kSecValueData: payload}, None)
         if status != Security.errSecSuccess:
             raise KeychainError(f"Не удалось сохранить ключи в Связке macOS (код {status}).")
+
+
+if sys.platform == 'win32':
+    from windows_credentials import WindowsKeyStore
+
+    class KeychainStore(WindowsKeyStore):
+        """Same storage interface, protected by the current Windows user's DPAPI."""
+
+        def __init__(self, service="local.sobes.assistant.api-keys"):
+            super().__init__(error_type=KeychainError)
 
 
 @dataclass(frozen=True)

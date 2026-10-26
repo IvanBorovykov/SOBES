@@ -1,4 +1,5 @@
 import copy
+import sys
 import unittest
 from unittest.mock import Mock, patch
 
@@ -101,6 +102,7 @@ class KeyPoolTests(unittest.TestCase):
         error.response = Mock(headers={"retry-after": "123"})
         self.assertEqual(retry_seconds(error), 123)
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS Keychain API')
     def test_secret_is_passed_to_keychain_api_only_as_data(self):
         store = KeychainStore("local.sobes.test")
         with patch("api_keys.Security.SecItemUpdate", return_value=0) as update:
