@@ -272,6 +272,44 @@ class WindowsUiTests(unittest.TestCase):
         self.assertEqual(self.keys.active_id, self.keys.entries()[-1].id)
         self.assertEqual(entries[2].get(), '')
 
+    def test_first_key_has_clear_profile_label_and_accepts_clipboard_paste(self):
+        self.keys.replace([], None, True)
+        self.app.open_keys()
+        window = self.app._dialogs['keys']
+        self.app.root.update()
+        frame = window.winfo_children()[0]
+        listing = next(widget for widget in frame.winfo_children() if widget.winfo_class() == 'TCombobox')
+        entries = [widget for widget in frame.winfo_children() if widget.winfo_class() == 'TEntry']
+        secret = entries[2]
+        self.assertIn('Новый ключ', listing.get())
+        self.assertEqual(str(secret.cget('state')), 'normal')
+        self.assertEqual(window.focus_get(), secret)
+        # WM_CHAR carries actual text even when Tk cannot map a synthetic keysym
+        # for the current Windows keyboard layout.
+        platform.user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                                ctypes.c_size_t, ctypes.c_ssize_t]
+        self.assertTrue(platform.user32.PostMessageW(secret.winfo_id(), 0x0102, ord('a'), 1))
+        self.app.root.update()
+        self.assertEqual(secret.get(), 'a')
+        with patch.object(window, 'clipboard_get', return_value='  dummy-first-api-key  '):
+            self.button(window, 'Вставить ключ из буфера').invoke()
+        self.assertEqual(secret.get(), 'dummy-first-api-key')
+        self.button(window, 'Сохранить и использовать').invoke()
+        self.assertEqual(len(self.keys.entries()), 1)
+        self.assertEqual(self.keys.entries()[0].secret, 'dummy-first-api-key')
+        self.assertEqual(secret.get(), '')
+
+    def test_secret_paste_uses_physical_control_v_binding(self):
+        self.app.open_keys()
+        window = self.app._dialogs['keys']
+        self.app.root.update()
+        frame = window.winfo_children()[0]
+        secret = [widget for widget in frame.winfo_children() if widget.winfo_class() == 'TEntry'][2]
+        with patch.object(window, 'clipboard_get', return_value='dummy-physical-paste-key') as clipboard:
+            secret.event_generate('<Control-KeyPress>', keycode=86)
+        clipboard.assert_called_once()
+        self.assertEqual(secret.get(), 'dummy-physical-paste-key')
+
 
 if __name__ == '__main__':
     unittest.main()

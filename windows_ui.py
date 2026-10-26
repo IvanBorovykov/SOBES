@@ -235,6 +235,7 @@ class WindowsApp:
         if existing is not None and existing.winfo_exists():
             existing.deiconify()
             existing.lift()
+            existing.focus_set()
             return None
         window = tk.Toplevel(self.root)
         window.title(title)
@@ -317,26 +318,48 @@ class WindowsApp:
         self._schedule_remember()
 
     def open_keys(self):
-        window = self.dialog('keys', 'SOBES — API-ключи Gemini', '660x520')
+        window = self.dialog('keys', 'SOBES — API-ключи Gemini', '660x610')
         if window is None:
             return
         frame = ttk.Frame(window, padding=16)
         frame.pack(fill='both', expand=True)
-        listing = ttk.Combobox(frame, state='readonly')
+        ttk.Label(frame, text='Сохранённые профили — выберите существующий или добавьте новый').pack(anchor='w', pady=(0, 4))
+        listing = ttk.Combobox(frame, state='readonly', takefocus=False)
         listing.pack(fill='x')
         fields = {}
+        inputs = {}
         for name, title in (('name', 'Название'), ('project', 'Проект Google Cloud (необязательно)'),
-                            ('secret', 'API-ключ (пустое поле сохраняет прежний ключ)')):
+                            ('secret', 'ВСТАВЬТЕ API-КЛЮЧ СЮДА (при редактировании можно оставить пустым)')):
             ttk.Label(frame, text=title).pack(anchor='w', pady=(9, 0))
             fields[name] = tk.StringVar()
-            ttk.Entry(frame, textvariable=fields[name], show='•' if name == 'secret' else '').pack(fill='x')
+            inputs[name] = ttk.Entry(frame, textvariable=fields[name], show='•' if name == 'secret' else '')
+            inputs[name].pack(fill='x')
+
+        def paste_secret():
+            try:
+                value = window.clipboard_get().strip()
+            except tk.TclError:
+                self.report(ValueError('В буфере обмена нет текста. Скопируйте API-ключ в Google AI Studio.'), window)
+                return
+            fields['secret'].set(value)
+            inputs['secret'].focus_set()
+            inputs['secret'].icursor('end')
+
+        def control_key(event):
+            # Match the physical V key so paste also works with Cyrillic layouts.
+            if event.keycode == 86:
+                paste_secret()
+                return 'break'
+
+        inputs['secret'].bind('<Control-KeyPress>', control_key)
+        ttk.Button(frame, text='Вставить ключ из буфера', command=paste_secret).pack(anchor='w', pady=(6, 0))
         automatic = tk.BooleanVar(value=self.keys.auto_switch)
         info = tk.StringVar()
         selected = [None]
         entries = []
 
         def select(event=None):
-            index = listing.current()
+            index = listing.current() - 1
             entry = entries[index] if 0 <= index < len(entries) else None
             selected[0] = entry.id if entry else None
             fields['name'].set(entry.name if entry else f'Ключ {len(entries) + 1}')
@@ -345,11 +368,10 @@ class WindowsApp:
 
         def refresh(active=None):
             entries[:] = self.keys.entries()
-            listing.configure(values=[e.name + (' (активный)' if e.id == self.keys.active_id else '') for e in entries])
-            index = next((i for i, entry in enumerate(entries) if entry.id == active), 0 if entries else -1)
-            listing.set('')
-            if index >= 0:
-                listing.current(index)
+            listing.configure(values=['Новый ключ — вставьте API-ключ в поле ниже'] + [
+                e.name + (' (активный)' if e.id == self.keys.active_id else '') for e in entries])
+            index = next((i + 1 for i, entry in enumerate(entries) if entry.id == active), 1 if entries else 0)
+            listing.current(index)
             select()
             info.set(self.keys.status())
             self.update_status()
@@ -400,13 +422,16 @@ class WindowsApp:
         row.pack(fill='x', pady=10)
 
         def add():
-            listing.set('')
+            listing.current(0)
             select()
+            inputs['secret'].focus_set()
 
         for title, callback in (('Добавить ключ', add), ('Сохранить и использовать', save), ('Удалить', delete)):
             ttk.Button(row, text=title, command=callback).pack(side='left', padx=3)
         ttk.Button(frame, text='Закрыть', command=window.destroy).pack(anchor='e')
         refresh(self.keys.active_id)
+        window.update_idletasks()
+        inputs['secret'].focus_force()
 
     def open_files(self):
         window = self.dialog('files', 'SOBES — контекст файлов', '780x430')
